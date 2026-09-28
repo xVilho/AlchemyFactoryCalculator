@@ -218,7 +218,7 @@ function computeNodePorts(node) {
  */
 function plannerGetNodeRates(node) {
     if (node.kind === 'note') return null;
-    if (node.kind === 'portal') return plannerGetPortalRates(node);
+    if (node.kind === 'portal' || node.kind === 'waypoint') return plannerGetPortalRates(node);
     if (node.moduleId) return plannerGetModuleRates(node.moduleId);
     return plannerGetRecipeRates(node.recipeId, node.recipeModifiers);
 }
@@ -350,12 +350,56 @@ function plannerResolveFlows(planData = null) {
         (portConnections[outKey] = portConnections[outKey] || []).push(edge.id);
         (portConnections[inKey] = portConnections[inKey] || []).push(edge.id);
 
-        const supply = portRemaining[outKey] ?? 0;
-        const demand = portRemaining[inKey] ?? 0;
+        let supply = portRemaining[outKey] ?? 0;
+        let demand = portRemaining[inKey] ?? 0;
+
+        const fromNode = planData.nodes[edge.fromNode];
+        const toNode = planData.nodes[edge.toNode];
+        
+        // Portals act as perfect passthroughs, they do not bottleneck the flow
+        if (fromNode && (fromNode.kind === 'portal' || fromNode.kind === 'waypoint')) supply = 99999999;
+        if (toNode && (toNode.kind === 'portal' || toNode.kind === 'waypoint')) demand = 99999999;
+
         const flow = Math.max(0, Math.min(supply, demand));
         edgeFlow[edge.id] = flow;
-        portRemaining[outKey] = supply - flow;
-        portRemaining[inKey] = demand - flow;
+        
+        if (!fromNode || (fromNode.kind !== 'portal' && fromNode.kind !== 'waypoint')) portRemaining[outKey] = (portRemaining[outKey] ?? 0) - flow;
+        if (!toNode || (toNode.kind !== 'portal' && toNode.kind !== 'waypoint')) portRemaining[inKey] = (portRemaining[inKey] ?? 0) - flow;
+    });
+
+    // Auto-update Portal theoretical rates and remaining values so they perfectly reflect the flow
+    Object.values(planData.nodes).forEach(node => {
+        if (node.kind === 'portal' || node.kind === 'waypoint') {
+            const ports = nodePortsCache[node.id];
+            if (!ports) return;
+            let maxFlow = 0;
+            
+            ports.inputs.forEach(p => {
+                const inKey = plannerPortKey(node.id, p.item, 'in');
+                const outKey = plannerPortKey(node.id, p.item, 'out');
+                
+                let inFlow = 0;
+                let outFlow = 0;
+                
+                (portConnections[inKey] || []).forEach(eid => inFlow += edgeFlow[eid]);
+                (portConnections[outKey] || []).forEach(eid => outFlow += edgeFlow[eid]);
+                
+                const totalFlow = Math.max(inFlow, outFlow);
+                maxFlow = Math.max(maxFlow, totalFlow);
+                
+                portTheoretical[inKey] = totalFlow;
+                portTheoretical[outKey] = totalFlow;
+                portRemaining[inKey] = totalFlow - inFlow;
+                portRemaining[outKey] = totalFlow - outFlow;
+                
+                p.rate = totalFlow; // Update UI rate visually
+            });
+            ports.outputs.forEach(p => {
+                p.rate = portTheoretical[plannerPortKey(node.id, p.item, 'out')] || 0;
+            });
+            
+            node.machineCount = maxFlow || 1;
+        }
     });
 
     const flows = { nodePortsCache, portTheoretical, portRemaining, portConnections, edgeFlow };

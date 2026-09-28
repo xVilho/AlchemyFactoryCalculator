@@ -1,0 +1,5 @@
+ools', 'ui')}
+            </div>
+            <button class="split-btn" style="width:100%;" onclick="plannerSelectAllUpstreamNodes('${node.id}')">
+                ▭ ${t('Select All Upstream', 'ui')}
+  

@@ -439,6 +439,7 @@ function renderPlannerNodeModalBody(nodeId) {
             <div style="font-size:0.78em; color:#888; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">
                 ${t('Graph Tools', 'ui')}
             </div>
+            <button class="split-btn" style="width:100%;" onclick="plannerAutoBalanceUpstream('${node.id}')">⚖️ Auto-Balance Upstream</button>
             <button class="split-btn" style="width:100%;" onclick="plannerSelectAllUpstreamNodes('${node.id}')">
                 ▭ ${t('Select All Upstream', 'ui')}
             </button>
@@ -1449,4 +1450,128 @@ function renderPlannerSummary(flows) {
             ${sectionHtml('machines', t('Machines', 'ui'), machineRows, machineEntries.reduce((s, [, c]) => s + c, 0))}
         </div>
     `;
+}
+
+function choosePlannerWaypointFromPicker() {
+    if (!_plannerPickerContext) return;
+    createPlannerWaypointFromPicker(_plannerPickerContext);
+    closePlannerRecipePickerMenu();
+}
+
+function createPlannerWaypointFromPicker(ctx) {
+    const itemName = ctx.item;
+    plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
+    const newNodeId = 'pnode_' + plannerState._nodeSeq;
+    
+    // offset position slightly so it doesn't overlap exactly if dropped on itself
+    plannerState.nodes[newNodeId] = {
+        id: newNodeId, kind: 'waypoint', portalItem: itemName, machineCount: 1,
+        x: Math.round(ctx.graphX), y: Math.round(ctx.graphY)
+    };
+    
+    plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
+    const newEdgeId = 'pedge_' + plannerState._edgeSeq;
+    
+    const edge = { id: newEdgeId, item: itemName, createdAt: Date.now() };
+    if (ctx.originDir === 'out') {
+        edge.fromNode = ctx.sourceNodeId;
+        edge.toNode = newNodeId;
+    } else {
+        edge.fromNode = newNodeId;
+        edge.toNode = ctx.sourceNodeId;
+    }
+    plannerState.edges[newEdgeId] = edge;
+
+    recomputeAndRefreshPlanner();
+    savePlannerState();
+}
+
+function _calculateNodeDemand(targetId) {
+    const upstreamIds = [...getPlannerUpstreamNodeIds(targetId)];
+    const nodeDemand = {}; // nodeId -> item -> demand
+    upstreamIds.forEach(id => nodeDemand[id] = {});
+
+    // Compute reverse graph edges
+    const consumersOf = {};
+    upstreamIds.forEach(id => consumersOf[id] = []);
+    Object.values(plannerState.edges).forEach(e => {
+        if (upstreamIds.includes(e.fromNode) && upstreamIds.includes(e.toNode)) {
+            consumersOf[e.fromNode].push({ toNode: e.toNode, item: e.item });
+        }
+    });
+
+    // Kahn's algorithm for topological sort (reverse)
+    const inDegree = {};
+    upstreamIds.forEach(id => inDegree[id] = 0);
+    upstreamIds.forEach(id => {
+        consumersOf[id].forEach(c => inDegree[id]++);
+    });
+
+    const queue = [];
+    upstreamIds.forEach(id => { if (inDegree[id] === 0) queue.push(id); });
+
+    // Ensure targetId is the root consumer
+    // The target node keeps its current machine count
+    const targetNode = plannerState.nodes[targetId];
+    if (targetNode) {
+        const rates = plannerGetNodeRates(targetNode);
+        if (rates) {
+            rates.inputsPerMachine.forEach(p => {
+                nodeDemand[targetId][p.item] = (nodeDemand[targetId][p.item] || 0) + (p.rate * targetNode.machineCount);
+            });
+        }
+    }
+
+    const processed = new Set();
+    while (queue.length > 0) {
+        const curr = queue.shift();
+        processed.add(curr);
+
+        if (curr !== targetId) {
+            // Satisfy demand
+            const currNode = plannerState.nodes[curr];
+            const rates = plannerGetNodeRates(currNode);
+            if (rates) {
+                // Determine max machine count needed to satisfy all requested items
+                let requiredCount = 0;
+                rates.outputsPerMachine.forEach(p => {
+                    const demand = nodeDemand[curr][p.item] || 0;
+                    if (p.rate > 0) requiredCount = Math.max(requiredCount, demand / p.rate);
+                });
+                
+                // Keep it at least what it currently is, or set exactly?
+                // Auto-balance sets exactly:
+                currNode.machineCount = requiredCount;
+
+                // Propagate upstream
+                rates.inputsPerMachine.forEach(p => {
+                    nodeDemand[curr][p.item] = (nodeDemand[curr][p.item] || 0) + (p.rate * requiredCount);
+                });
+            }
+        }
+
+        // Pass demand upstream
+        Object.values(plannerState.edges).forEach(e => {
+            if (e.toNode === curr && upstreamIds.includes(e.fromNode)) {
+                // Assuming all demand for e.item is satisfied evenly, but since it's a simple graph, just add the demand to the producer
+                nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + (nodeDemand[curr][e.item] || 0);
+                inDegree[e.fromNode]--;
+                if (inDegree[e.fromNode] === 0) queue.push(e.fromNode);
+            }
+        });
+    }
+}
+
+function plannerAutoBalanceUpstream(nodeId) {
+    if (!plannerState.nodes[nodeId]) return;
+    _calculateNodeDemand(nodeId);
+    
+    // Some nodes might have disjoint paths or cycles not handled perfectly by Kahn's above if there are cycles.
+    // It's a best-effort auto-balance.
+    recomputeAndRefreshPlanner();
+    savePlannerState();
+    
+    const upstreamIds = [...getPlannerUpstreamNodeIds(nodeId)].filter(id => id !== nodeId);
+    flashPlannerLinkFeedback(nodeId, upstreamIds);
+    closeModal('planner-node-modal');
 }

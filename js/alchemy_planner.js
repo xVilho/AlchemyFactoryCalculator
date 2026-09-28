@@ -88,7 +88,7 @@ let _plannerSettings = {
 };
 let _plannerLastFlows = null; // 上一次 resolveFlows() 的結果快取 (供拖曳節點時即時重繪邊線用)
 let _plannerCanvasHovered = false;
-let _plannerLinkMode = false;
+let _plannerLinkMode = 'none';
 let _plannerSelectMode = false;
 let _plannerSelectedNodeIds = new Set();
 const PLANNER_ZOOM_MIN = 0.2;
@@ -731,6 +731,11 @@ function onPlannerAddPortalClick() {
     openPlannerItemPicker(graphX, graphY, 'portal');
 }
 
+function onPlannerAddWaypointClick() {
+    const { graphX, graphY } = _plannerGetCenterGraphPos();
+    openPlannerItemPicker(graphX, graphY, 'waypoint');
+}
+
 function onPlannerCanvasContextMenu(e) {
     if (e.target.closest('.planner-node')) return;
     e.preventDefault();
@@ -752,10 +757,10 @@ function openPlannerItemPicker(graphX, graphY, kind) {
 }
 
 function addPlannerNode(itemName, graphX, graphY, kind = 'recipe') {
-    if (kind === 'portal') {
+    if (kind === 'portal' || kind === 'waypoint') {
         plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
         const id = 'pnode_' + plannerState._nodeSeq;
-        plannerState.nodes[id] = { id, kind: 'portal', portalItem: itemName, machineCount: 1, x: Math.round(graphX), y: Math.round(graphY) };
+        plannerState.nodes[id] = { id, kind, portalItem: itemName, machineCount: 1, x: Math.round(graphX), y: Math.round(graphY) };
         renderPlanner(); savePlannerState();
         return;
     }
@@ -845,6 +850,7 @@ function createPlannerNodeEl(node, flows) {
 
     if (node.kind === 'note') return renderPlannerNoteNode(wrap, node);
     if (node.kind === 'portal') return renderPlannerPortalNode(wrap, node, flows);
+    if (node.kind === 'waypoint') return renderPlannerWaypointNode(wrap, node, flows);
 
     const ports = flows.nodePortsCache[node.id] || computeNodePorts(node);
     wrap.innerHTML = ``;
@@ -1232,13 +1238,37 @@ function patchPlannerNodeDisplay(node, flows) {
 }
 
 function togglePlannerLinkMode() {
-    _plannerLinkMode = !_plannerLinkMode;
+    const modes = ['none', 'all', 'upstream', 'downstream'];
+    let idx = modes.indexOf(_plannerLinkMode);
+    if (idx === -1) idx = 0;
+    _plannerLinkMode = modes[(idx + 1) % modes.length];
     updateAllPlannerLinkButtons();
+}
+
+function getPlannerLinkTitle() {
+    if (_plannerLinkMode === 'all') return t('Link: All Connected', 'ui');
+    if (_plannerLinkMode === 'upstream') return t('Link: Upstream Only', 'ui');
+    if (_plannerLinkMode === 'downstream') return t('Link: Downstream Only', 'ui');
+    return t('Link: None', 'ui');
+}
+
+function getPlannerLinkIcon() {
+    if (_plannerLinkMode === 'all') return '🔗';
+    if (_plannerLinkMode === 'upstream') return '◀';
+    if (_plannerLinkMode === 'downstream') return '▶';
+    return '🔗';
 }
 
 function updateAllPlannerLinkButtons() {
     document.querySelectorAll('.planner-link-btn').forEach(btn => {
-        btn.classList.toggle('active', _plannerLinkMode);
+        btn.classList.toggle('active', _plannerLinkMode !== 'none');
+        btn.title = getPlannerLinkTitle();
+        const iconSpan = btn.querySelector('.link-icon') || btn;
+        if (btn.querySelector('.link-icon')) {
+            btn.querySelector('.link-icon').textContent = getPlannerLinkIcon();
+        } else {
+            btn.textContent = getPlannerLinkIcon();
+        }
     });
 }
 
@@ -1262,7 +1292,15 @@ function onPlannerMachineCountBlur(nodeId, inputEl) {
 }
 
 function propagatePlannerMachineRatio(sourceNodeId, ratio) {
-    const connected = getPlannerConnectedNodeIds(sourceNodeId).filter(id => id !== sourceNodeId);
+    let connected = [];
+    if (_plannerLinkMode === 'all') {
+        connected = [...getPlannerConnectedNodeIds(sourceNodeId)].filter(id => id !== sourceNodeId);
+    } else if (_plannerLinkMode === 'upstream') {
+        connected = [...getPlannerUpstreamNodeIds(sourceNodeId)].filter(id => id !== sourceNodeId);
+    } else if (_plannerLinkMode === 'downstream') {
+        connected = [...getPlannerDownstreamNodeIds(sourceNodeId)].filter(id => id !== sourceNodeId);
+    }
+    
     if (connected.length === 0) return;
 
     connected.forEach(id => {
@@ -1685,4 +1723,40 @@ function renderPlannerEmptyHint() {
         <div class="planner-empty-hint-title">${t('Planner Controls', 'ui')}</div>
         ${rows}
     `;
+}
+
+function renderPlannerWaypointNode(wrap, node, flows) {
+    const ports = flows.nodePortsCache[node.id] || computeNodePorts(node);
+    
+    wrap.style.width = '24px';
+    wrap.style.height = '24px';
+    wrap.style.borderRadius = '50%';
+    wrap.style.background = 'var(--accent)';
+    wrap.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.cursor = 'move';
+    wrap.style.zIndex = '10';
+
+    let portsHtml = '';
+    ports.inputs.forEach(p => {
+        portsHtml += `<div class="planner-port planner-port-in" data-node="${node.id}" data-item="${p.item}" data-dir="in" style="position:absolute; left:-6px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--bg-light); border:2px solid var(--accent);"></div>`;
+    });
+    ports.outputs.forEach(p => {
+        portsHtml += `<div class="planner-port planner-port-out" data-node="${node.id}" data-item="${p.item}" data-dir="out" style="position:absolute; right:-6px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--bg-light); border:2px solid var(--accent);"></div>`;
+    });
+
+    wrap.innerHTML = `
+        <div class="planner-node-header" style="position:absolute; top:0; left:0; right:0; bottom:0; background:transparent; border:none; z-index:1; border-radius:50%;"></div>
+        <div style="pointer-events:none; font-size:12px; opacity:0.8; z-index:2; position:relative;">📍</div>
+        ${portsHtml}
+        <button class="planner-close-btn" title="${t('Remove', 'ui')}" style="position:absolute; top:-10px; right:-10px; width:16px; height:16px; font-size:10px; padding:0; display:none; z-index:10;" onclick="removePlannerNode('${node.id}')">✖</button>
+    `;
+
+    wrap.onmouseenter = () => { const btn = wrap.querySelector('.planner-close-btn'); if(btn) btn.style.display = 'block'; };
+    wrap.onmouseleave = () => { const btn = wrap.querySelector('.planner-close-btn'); if(btn) btn.style.display = 'none'; };
+    
+    attachPlannerNodeDrag(wrap, node);
+    return wrap;
 }

@@ -1305,7 +1305,7 @@ function propagatePlannerMachineRatio(sourceNodeId, ratio) {
 
     connected.forEach(id => {
         const n = plannerState.nodes[id];
-        if (n) n.machineCount = Math.max(0, n.machineCount * ratio);
+        if (n && n.kind !== 'portal') n.machineCount = Math.max(0, n.machineCount * ratio);
     });
 
     recomputeAndRefreshPlanner();

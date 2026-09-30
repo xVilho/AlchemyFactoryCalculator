@@ -1525,6 +1525,7 @@ function toggleFavoriteStar(event, btn) {
     }
     renderCauldronFavorites();
     saveCauldronSettings();
+    syncCauldronToMainDB();
 }
 
 function checkUnattainableItems(producedSet) {
@@ -1574,6 +1575,7 @@ function toggleFavorite(...args) {
 
     renderCauldronFavorites();
     saveCauldronSettings();
+    syncCauldronToMainDB();
 }
 
 function renderCauldronFavorites() {
@@ -1651,6 +1653,7 @@ function removeFavorite(idx) {
     cauldronState.favorites.splice(idx, 1);    
     renderCauldronFavorites();
     saveCauldronSettings();
+    syncCauldronToMainDB();
 }
 
 /**
@@ -1725,6 +1728,7 @@ function importCauldronFavorites() {
                 if (importCount > 0) {
                     saveCauldronSettings();
                     renderCauldronFavorites();
+                    syncCauldronToMainDB();
                     alert(`Successfully imported ${importCount} recipes!`);
                 } else {
                     alert("No new or valid recipes found in the file.");

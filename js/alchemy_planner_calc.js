@@ -357,19 +357,19 @@ function plannerResolveFlows(planData = null) {
         const toNode = planData.nodes[edge.toNode];
         
         // Portals act as perfect passthroughs, they do not bottleneck the flow
-        if (fromNode && (fromNode.kind === 'portal' || fromNode.kind === 'waypoint')) supply = 99999999;
-        if (toNode && (toNode.kind === 'portal' || toNode.kind === 'waypoint')) demand = 99999999;
+        if (fromNode && fromNode.kind === 'waypoint') supply = 99999999;
+        if (toNode && toNode.kind === 'waypoint') demand = 99999999;
 
         const flow = Math.max(0, Math.min(supply, demand));
         edgeFlow[edge.id] = flow;
         
-        if (!fromNode || (fromNode.kind !== 'portal' && fromNode.kind !== 'waypoint')) portRemaining[outKey] = (portRemaining[outKey] ?? 0) - flow;
-        if (!toNode || (toNode.kind !== 'portal' && toNode.kind !== 'waypoint')) portRemaining[inKey] = (portRemaining[inKey] ?? 0) - flow;
+        if (!fromNode || fromNode.kind !== 'waypoint') portRemaining[outKey] = (portRemaining[outKey] ?? 0) - flow;
+        if (!toNode || toNode.kind !== 'waypoint') portRemaining[inKey] = (portRemaining[inKey] ?? 0) - flow;
     });
 
     // Auto-update Portal theoretical rates and remaining values so they perfectly reflect the flow
     Object.values(planData.nodes).forEach(node => {
-        if (node.kind === 'portal' || node.kind === 'waypoint') {
+        if (node.kind === 'waypoint') {
             const ports = nodePortsCache[node.id];
             if (!ports) return;
             let maxFlow = 0;

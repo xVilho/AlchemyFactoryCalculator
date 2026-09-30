@@ -543,8 +543,8 @@ button.reset-btn:hover { background: var(--danger); color: white; }
 /* ==========================================================================
     SECTION: CAULDRON VIEW STYLES
     ========================================================================== */
-.cauldron-grid { display: grid; grid-template-columns: 280px 1fr 350px; gap: 15px; height: 100%; }
-.scroll-panel { display: flex; flex-direction: column; max-height: 100%; }
+.cauldron-grid { display: grid; grid-template-columns: 280px 1fr 350px; gap: 15px; align-items: start; }
+.scroll-panel { display: flex; flex-direction: column; position: sticky; top: 15px; max-height: calc(100vh - 30px); }
 .candidate-list { flex: 1; overflow-y: auto; margin-top: 10px; border: 1px solid #444; background: #222; padding: 5px; }
 .candidate-item { display: flex; align-items: center; padding: 4px 8px; border-bottom: 1px solid #333; font-size: 0.9em; }
 .cand-name { flex: 1; margin-left: 4px; }
@@ -586,7 +586,7 @@ button.reset-btn:hover { background: var(--danger); color: white; }
 /* ==========================================================================
     SECTION: CAULDRON MULTI-STEP TABLE
     ========================================================================== */
-.cauldron-multistep-scroll { overflow: auto; max-height: calc(100vh - 220px); }
+.cauldron-multistep-scroll { overflow: visible; max-height: none; }
 #cauldron-multistep-table th,
 #cauldron-multistep-table td { text-align: center; vertical-align: middle; }
 .ms-item-name { display: flex; align-items: center; gap: 6px; justify-content: flex-start; }

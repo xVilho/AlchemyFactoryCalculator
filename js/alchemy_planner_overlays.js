@@ -1491,7 +1491,24 @@ function _calculateNodeDemand(targetId) {
     const nodeDemand = {}; // nodeId -> item -> demand
     upstreamIds.forEach(id => nodeDemand[id] = {});
 
-    // Compute reverse graph edges
+    // 1. ADD DEMAND FROM EXTERNAL CONSUMERS
+    // If a node in upstreamIds supplies a node NOT in upstreamIds, we must include that external demand!
+    Object.values(plannerState.edges).forEach(e => {
+        if (upstreamIds.includes(e.fromNode) && !upstreamIds.includes(e.toNode)) {
+            const externalNode = plannerState.nodes[e.toNode];
+            const rates = plannerGetNodeRates(externalNode);
+            if (rates) {
+                const p = rates.inputsPerMachine.find(p => p.item === e.item);
+                if (p) {
+                    const numSuppliers = Object.values(plannerState.edges).filter(edge => edge.toNode === e.toNode && edge.item === e.item).length;
+                    const demand = (p.rate * externalNode.machineCount) / (numSuppliers || 1);
+                    nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + demand;
+                }
+            }
+        }
+    });
+
+    // 2. Compute reverse graph edges for topological sort
     const consumersOf = {};
     upstreamIds.forEach(id => consumersOf[id] = []);
     Object.values(plannerState.edges).forEach(e => {
@@ -1511,7 +1528,6 @@ function _calculateNodeDemand(targetId) {
     upstreamIds.forEach(id => { if (inDegree[id] === 0) queue.push(id); });
 
     // Ensure targetId is the root consumer
-    // The target node keeps its current machine count
     const targetNode = plannerState.nodes[targetId];
     if (targetNode) {
         const rates = plannerGetNodeRates(targetNode);
@@ -1532,16 +1548,17 @@ function _calculateNodeDemand(targetId) {
             const currNode = plannerState.nodes[curr];
             const rates = plannerGetNodeRates(currNode);
             if (rates) {
-                // Determine max machine count needed to satisfy all requested items
                 let requiredCount = 0;
-                rates.outputsPerMachine.forEach(p => {
-                    const demand = nodeDemand[curr][p.item] || 0;
-                    if (p.rate > 0) requiredCount = Math.max(requiredCount, demand / p.rate);
-                });
-                
-                // Keep it at least what it currently is, or set exactly?
-                // Auto-balance sets exactly:
-                currNode.machineCount = requiredCount;
+                if (currNode.kind === 'portal') {
+                    // Do NOT auto-balance portals! Keep their user-defined machine count.
+                    requiredCount = currNode.machineCount;
+                } else {
+                    rates.outputsPerMachine.forEach(p => {
+                        const demand = nodeDemand[curr][p.item] || 0;
+                        if (p.rate > 0) requiredCount = Math.max(requiredCount, demand / p.rate);
+                    });
+                    currNode.machineCount = requiredCount;
+                }
 
                 // Propagate upstream
                 rates.inputsPerMachine.forEach(p => {
@@ -1553,15 +1570,18 @@ function _calculateNodeDemand(targetId) {
         // Pass demand upstream
         Object.values(plannerState.edges).forEach(e => {
             if (e.toNode === curr && upstreamIds.includes(e.fromNode)) {
-                // Assuming all demand for e.item is satisfied evenly, but since it's a simple graph, just add the demand to the producer
-                nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + (nodeDemand[curr][e.item] || 0);
+                // Divide demand among all internal suppliers
+                const numSuppliers = Object.values(plannerState.edges).filter(edge => edge.toNode === curr && edge.item === e.item && upstreamIds.includes(edge.fromNode)).length;
+                const demandToPass = (nodeDemand[curr][e.item] || 0) / (numSuppliers || 1);
+                
+                nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + demandToPass;
+                
                 inDegree[e.fromNode]--;
                 if (inDegree[e.fromNode] === 0) queue.push(e.fromNode);
             }
         });
     }
 }
-
 function plannerAutoBalanceUpstream(nodeId) {
     if (!plannerState.nodes[nodeId]) return;
     _calculateNodeDemand(nodeId);

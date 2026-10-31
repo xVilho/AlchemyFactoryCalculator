@@ -564,6 +564,22 @@ function adjustRate(delta) {
     calculate(); 
 }
 
+function setSingleTargetUnit(val = 1) {
+    const modeToggle = document.getElementById('modeToggle');
+    if (modeToggle && modeToggle.checked) {
+        modeToggle.checked = false;
+        if (typeof toggleProductMode === 'function') toggleProductMode();
+    }
+    const machineMode = document.getElementById('machineModeToggle');
+    if (machineMode && machineMode.checked) {
+        machineMode.checked = false;
+        if (typeof toggleControlMode === 'function') toggleControlMode(true);
+    }
+    const el = document.getElementById('targetRate');
+    if (el) el.value = val;
+    calculate();
+}
+
 function adjustInput(id, delta) { const el = document.getElementById(id); let val = parseInt(el.value) || 0; el.value = Math.max(0, val + delta); saveSettings(); }
 
 
@@ -1000,6 +1016,43 @@ function _renderRecipeModalList() {
         div.innerHTML = content;
         list.appendChild(div);
     });
+
+    if (AlchemyCalcEngine && AlchemyCalcEngine.findChainAlternativeRecipes) {
+        const chainAlts = AlchemyCalcEngine.findChainAlternativeRecipes(DB, DB.settings, item).filter(a => a.item !== item);
+        if (chainAlts.length > 0) {
+            const altSection = document.createElement('div');
+            altSection.style.cssText = 'margin-top:16px; padding-top:12px; border-top:1px dashed #555;';
+            let altHtml = `<div style="font-size:0.88em; font-weight:bold; color:var(--accent); margin-bottom:8px;">⚡ ${t('Alternative Recipes in Chain')}</div>`;
+            chainAlts.forEach(alt => {
+                const itemDef = DB.items[alt.item];
+                altHtml += `
+                    <div class="chain-recipe-row" style="margin-bottom:6px;">
+                        <span class="chain-recipe-item-name">
+                            <img src="img/item${itemDef?.id ?? 0}.png" width="18" height="18">
+                            <strong>${alt.item}</strong>
+                        </span>
+                        <div class="chain-recipe-options">
+                `;
+                alt.candidates.forEach(cand => {
+                    const isActive = cand.id === alt.activeRecipeId;
+                    let rawHint = '';
+                    if (cand.primaryRaw && cand.primaryRaw.length > 0) {
+                        rawHint = `<span class="chain-recipe-raw-hint">(${cand.primaryRaw.join(', ')})</span>`;
+                    }
+                    altHtml += `
+                        <button class="chain-recipe-btn ${isActive ? 'active' : ''}"
+                            onclick="setChainRecipePreference('${alt.item}', '${cand.id}'); openRecipeModal('${item}', '${pathKey}');">
+                            ${isActive ? '✓ ' : ''}${cand.id} <span style="opacity:0.75; font-size:0.9em;">[${t(cand.machine, 'machines')}]</span>${rawHint}
+                        </button>
+                    `;
+                });
+                altHtml += `</div></div>`;
+            });
+            altSection.innerHTML = altHtml;
+            list.appendChild(altSection);
+        }
+    }
+
     document.getElementById('recipe-modal').style.display = 'flex';
 }
 
@@ -1028,9 +1081,198 @@ function openDrillDown(item, rate) {
     window.open(url, '_blank');
 }
 
-/* ==========================================================================
-   SECTION: CUSTOM COST MODAL
-   ========================================================================== */
+function openUnitCostModal() {
+    try {
+        let targetItem = null;
+        const targetItemInput = document.getElementById('targetItemInput');
+        const rawInput = targetItemInput ? targetItemInput.value.trim() : '';
+
+        if (rawInput) {
+            targetItem = DB?.items?.[rawInput]
+                ? rawInput
+                : Object.keys(DB?.items || {}).find(k => k.toLowerCase() === rawInput.toLowerCase());
+        }
+
+        if (!targetItem && typeof _lastCalcParams !== 'undefined' && _lastCalcParams) {
+            if (_lastCalcParams.targetItem && DB?.items?.[_lastCalcParams.targetItem]) {
+                targetItem = _lastCalcParams.targetItem;
+            } else if (_lastCalcParams.targets && _lastCalcParams.targets.length > 0 && DB?.items?.[_lastCalcParams.targets[0].item]) {
+                targetItem = _lastCalcParams.targets[0].item;
+            }
+        }
+
+        if (!targetItem && DB?.settings?.targetItem && DB?.items?.[DB.settings.targetItem]) {
+            targetItem = DB.settings.targetItem;
+        }
+
+        if (!targetItem || !DB?.items?.[targetItem]) {
+            alert(t('Please select a target item first.'));
+            return;
+        }
+
+        const params = (typeof _lastCalcParams !== 'undefined' && _lastCalcParams)
+            ? _lastCalcParams
+            : (typeof gatherInputs === 'function' ? gatherInputs() : {});
+
+        const state = {
+            activeRecyclers: (typeof GLOBAL_CALC_STATE !== 'undefined' && GLOBAL_CALC_STATE.activeRecyclers) ? GLOBAL_CALC_STATE.activeRecyclers : new Set(),
+            forcedExternals: (typeof GLOBAL_CALC_STATE !== 'undefined' && GLOBAL_CALC_STATE.forcedExternals) ? GLOBAL_CALC_STATE.forcedExternals : new Set(),
+            preferredRecipes: DB?.settings?.preferredRecipes || {},
+            nodeRecipeOverrides: DB?.settings?.nodeRecipeOverrides || {},
+            recipeModifiers: DB?.settings?.recipeModifiers || {},
+            customCosts: DB?.settings?.customCosts || {},
+            expandCatalystInputs: DB?.settings?.expandCatalystInputs || {}
+        };
+
+        const data = AlchemyCalcEngine.computeUnitMaterialBreakdown(DB, state, targetItem, params);
+        if (!data) {
+            alert(t('Could not compute breakdown for this item.'));
+            return;
+        }
+
+        const formatCoins = (typeof formatCoinIcons === 'function')
+            ? formatCoinIcons
+            : (coins) => `${Math.round(coins).toLocaleString()} C`;
+
+        const modalTitle = document.getElementById('unit-cost-modal-title');
+        if (modalTitle) {
+            modalTitle.innerHTML = `<img src="img/item${DB.items[targetItem]?.id ?? 0}.png" width="24" height="24"> ${t('Material Breakdown for 1')} ${targetItem}`;
+        }
+
+        const body = document.getElementById('unit-cost-modal-body');
+        if (!body) return;
+
+        // Section 1: Summary Bar
+        let summaryHtml = `
+            <div class="unit-cost-summary-bar">
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Raw Material Cost')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--gold);">${formatCoins(data.totalRawCost)}</span>
+                </div>
+        `;
+
+        if (data.sellPrice) {
+            summaryHtml += `
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Retail Price')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--text);">${formatCoins(data.sellPrice)}</span>
+                </div>
+            `;
+        }
+
+        if (data.profit !== null) {
+            const sign = data.profit >= 0 ? '+' : '';
+            const color = data.profit >= 0 ? 'var(--profit)' : 'var(--warn)';
+            const marginPct = (data.margin * 100).toFixed(1);
+            summaryHtml += `
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Net Margin')}</span>
+                    <span class="unit-cost-summary-val" style="color:${color};">${sign}${formatCoins(data.profit)} (${sign}${marginPct}%)</span>
+                </div>
+            `;
+        }
+
+        if (data.totalHeat > 0) {
+            summaryHtml += `
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Heat Load')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--fuel);">${Number(data.totalHeat.toFixed(1))} P</span>
+                </div>
+            `;
+        }
+
+        summaryHtml += `</div>`;
+
+        // Section 2: Chain Alternative Recipes
+        let altSectionHtml = '';
+        if (data.chainAlternatives && data.chainAlternatives.length > 0) {
+            altSectionHtml = `
+                <div class="unit-modal-section">
+                    <div class="unit-modal-section-title">⚡ ${t('Recipe Choices in Chain')}</div>
+                    <div class="chain-recipes-list">
+            `;
+            data.chainAlternatives.forEach(alt => {
+                const itemDef = DB.items[alt.item];
+                altSectionHtml += `
+                    <div class="chain-recipe-row">
+                        <span class="chain-recipe-item-name">
+                            <img src="img/item${itemDef?.id ?? 0}.png" width="18" height="18">
+                            <strong>${alt.item}</strong>
+                        </span>
+                        <div class="chain-recipe-options">
+                `;
+                alt.candidates.forEach(cand => {
+                    const isActive = cand.id === alt.activeRecipeId;
+                    let rawHint = '';
+                    if (cand.primaryRaw && cand.primaryRaw.length > 0) {
+                        rawHint = `<span class="chain-recipe-raw-hint">(${cand.primaryRaw.join(', ')})</span>`;
+                    }
+                    const inputsSummary = Object.entries(cand.inputs || {}).map(([k, v]) => `${v}x ${k}`).join(', ');
+                    altSectionHtml += `
+                        <button class="chain-recipe-btn ${isActive ? 'active' : ''}"
+                            onclick="setChainRecipePreference('${alt.item}', '${cand.id}')"
+                            title="${t(cand.machine, 'machines')}: ${inputsSummary || 'None'}">
+                            ${isActive ? '✓ ' : ''}${cand.id} <span style="opacity:0.75; font-size:0.9em;">[${t(cand.machine, 'machines')}]</span>${rawHint}
+                        </button>
+                    `;
+                });
+                altSectionHtml += `</div></div>`;
+            });
+            altSectionHtml += `</div></div>`;
+        }
+
+        // Section 3: Raw Materials Required
+        let rawSectionHtml = `
+            <div class="unit-modal-section">
+                <div class="unit-modal-section-title">📦 ${t('Raw Materials Required for 1 Unit')}</div>
+                <div class="unit-mats-grid">
+        `;
+        data.rawMaterials.forEach(rm => {
+            rawSectionHtml += `
+                <div class="unit-mat-card">
+                    <div class="unit-mat-info">
+                        <img src="img/item${rm.id}.png" width="24" height="24">
+                        <div>
+                            <strong>${rm.item}</strong>
+                            <div style="font-size:0.8em; color:#888;">${formatCoins(rm.unitPrice)} ${t('each')}</div>
+                        </div>
+                    </div>
+                    <div class="unit-mat-cost">
+                        <strong style="color:var(--accent); font-size:1.05em;">× ${Number(rm.qty.toFixed(4))}</strong>
+                        <div style="color:var(--gold); font-size:0.9em;">${formatCoins(rm.totalCost)}</div>
+                    </div>
+                </div>
+            `;
+        });
+        rawSectionHtml += `</div></div>`;
+
+        // Section 4: Intermediate Materials
+        let intermediateSectionHtml = '';
+        if (data.intermediates && data.intermediates.length > 0) {
+            intermediateSectionHtml = `
+                <div class="unit-modal-section" style="border-bottom:none; margin-bottom:0; padding-bottom:0;">
+                    <div class="unit-modal-section-title">🔄 ${t('Intermediate Components Produced')}</div>
+                    <div class="unit-intermediates-list">
+            `;
+            data.intermediates.forEach(im => {
+                intermediateSectionHtml += `
+                    <span class="unit-intermediate-chip">
+                        <img src="img/item${im.id}.png" width="16" height="16">
+                        ${im.item}: <strong>× ${Number(im.qty.toFixed(2))}</strong>
+                    </span>
+                `;
+            });
+            intermediateSectionHtml += `</div></div>`;
+        }
+
+        body.innerHTML = summaryHtml + altSectionHtml + rawSectionHtml + intermediateSectionHtml;
+        const modal = document.getElementById('unit-cost-modal');
+        if (modal) modal.style.display = 'flex';
+    } catch (err) {
+        console.error('Error in openUnitCostModal:', err);
+        alert(t('Error calculating unit material breakdown: ') + err.message);
+    }
+}
 
 function openCustomCostModal(focusItem = null) {
     if (!DB.settings.customCosts) DB.settings.customCosts = {};

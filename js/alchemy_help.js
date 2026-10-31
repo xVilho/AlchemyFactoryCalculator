@@ -391,6 +391,7 @@ function _togglePreferred(itemName, recipeId) {
             db.settings.preferredRecipes[itemName] = recipeId;
         }
         if (typeof persist === 'function') persist();
+        if (typeof calculate === 'function') calculate();
     } catch(e) { console.warn('help: togglePreferred failed', e); }
     _renderItemDetail(itemName);
 }
@@ -844,6 +845,7 @@ function _renderItemDetail(itemName) {
                 + '<div class="wiki-recipe-right">'
                 + '<span class="wiki-recipe-machine" ' + _oc('wikiSwitchToMachine', recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
                 + (recipe.baseTime != null ? '<span>' + recipe.baseTime + 's</span>' : '')
+                + (producers.length > 1 ? '<button class="split-btn wiki-pref-btn' + (isPreferred ? ' active' : '') + '" style="padding:2px 8px; font-size:0.75em; margin-left:6px;" onclick="_togglePreferred(decodeURIComponent(\'' + encodeURIComponent(itemName) + '\'), decodeURIComponent(\'' + encodeURIComponent(recipe.id) + '\'))">' + (isPreferred ? '★ ' + _tn('Preferred') : '☆ ' + _tn('Set Preferred')) + '</button>' : '')
                 + '</div></div>';
           }).join('');
 
@@ -862,6 +864,7 @@ function _renderItemDetail(itemName) {
                 + '<div class="wiki-recipe-right">'
                 + '<span class="wiki-recipe-machine" ' + _oc('wikiSwitchToMachine', recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
                 + (recipe.baseTime != null ? '<span>' + recipe.baseTime + 's</span>' : '')
+                + (producers.length > 1 ? '<button class="split-btn wiki-pref-btn' + (isPreferred ? ' active' : '') + '" style="padding:2px 8px; font-size:0.75em; margin-left:6px;" onclick="_togglePreferred(decodeURIComponent(\'' + encodeURIComponent(itemName) + '\'), decodeURIComponent(\'' + encodeURIComponent(recipe.id) + '\'))">' + (isPreferred ? '★ ' + _tn('Preferred') : '☆ ' + _tn('Set Preferred')) + '</button>' : '')
                 + '</div></div>';
           }).join('');
 

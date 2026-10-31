@@ -425,6 +425,85 @@ function renderCalculationResult(params, result) {
 
     updateSummaryLineFromResult(params, result.formulaLineData);
     updateEquilibriumWarning(result.equilibriumWarning);
+    renderChainRecipeAlternatives(params);
+}
+
+function renderChainRecipeAlternatives(params) {
+    const container = document.getElementById('chain-recipes-container');
+    if (!container) return;
+
+    if (params.isMulti || !params.targetItem) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    const alternatives = AlchemyCalcEngine.findChainAlternativeRecipes(DB, DB.settings, params.targetItem);
+    if (!alternatives || alternatives.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = `
+        <div class="chain-recipes-panel">
+            <div class="chain-recipes-header">
+                <span>⚡ ${t('Alternative Recipes in Chain')} (${params.targetItem})</span>
+                <span style="font-size:0.8em; color:#888; font-weight:normal;">${t('Click to switch recipe for this item across the chain')}</span>
+            </div>
+            <div class="chain-recipes-list">
+    `;
+
+    alternatives.forEach(alt => {
+        const itemDef = DB.items[alt.item];
+        html += `
+            <div class="chain-recipe-row">
+                <span class="chain-recipe-item-name">
+                    <img src="img/item${itemDef?.id ?? 0}.png" width="18" height="18">
+                    <strong>${alt.item}</strong>
+                </span>
+                <div class="chain-recipe-options">
+        `;
+        alt.candidates.forEach(cand => {
+            const isActive = cand.id === alt.activeRecipeId;
+            let rawHint = '';
+            if (cand.primaryRaw && cand.primaryRaw.length > 0) {
+                rawHint = `<span class="chain-recipe-raw-hint">(${cand.primaryRaw.join(', ')})</span>`;
+            }
+            const inputsSummary = Object.entries(cand.inputs || {}).map(([k, v]) => `${v}x ${k}`).join(', ');
+            html += `
+                <button class="chain-recipe-btn ${isActive ? 'active' : ''}"
+                    onclick="setChainRecipePreference('${alt.item}', '${cand.id}')"
+                    title="${t(cand.machine, 'machines')}: ${inputsSummary || 'None'}">
+                    ${isActive ? '✓ ' : ''}${cand.id} <span style="opacity:0.75; font-size:0.9em;">[${t(cand.machine, 'machines')}]</span>${rawHint}
+                </button>
+            `;
+        });
+        html += `</div></div>`;
+    });
+
+    html += `</div></div>`;
+    container.innerHTML = html;
+    container.style.display = 'block';
+}
+
+function setChainRecipePreference(item, recipeId) {
+    if (!DB.settings.preferredRecipes) DB.settings.preferredRecipes = {};
+    DB.settings.preferredRecipes[item] = recipeId;
+    if (DB.settings.nodeRecipeOverrides) {
+        for (const pathKey of Object.keys(DB.settings.nodeRecipeOverrides)) {
+            if (pathKey.endsWith('>' + item)) {
+                delete DB.settings.nodeRecipeOverrides[pathKey];
+            }
+        }
+    }
+    persist();
+    calculate();
+
+    const unitModal = document.getElementById('unit-cost-modal');
+    if (unitModal && unitModal.style.display === 'flex') {
+        openUnitCostModal();
+    }
 }
 
 function createSectionHeader(title) {

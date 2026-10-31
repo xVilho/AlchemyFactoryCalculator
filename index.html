@@ -104,6 +104,17 @@
             </div>
         </div>
 
+        <!-- 1-Unit Material Breakdown Modal -->
+        <div id="unit-cost-modal" class="modal-overlay" onclick="closeModal('unit-cost-modal')">
+            <div class="modal-content" onclick="event.stopPropagation()" style="min-width:340px; max-width:680px; width:92%;">
+                <div class="modal-header">
+                    <h2 id="unit-cost-modal-title" style="font-size:1.1em; margin:0; display:flex; align-items:center; gap:8px;">📦 Material Breakdown for 1 Unit</h2>
+                    <button class="close-modal" onclick="closeModal('unit-cost-modal')">&times;</button>
+                </div>
+                <div id="unit-cost-modal-body"></div>
+            </div>
+        </div>
+
         <!-- Planner Manager Modal -->
         <div id="planner-manage-modal" class="modal-overlay" onclick="closeModal('planner-manage-modal')">
             <div class="modal-content" onclick="event.stopPropagation()" style="min-width:420px; max-width:560px;">
@@ -341,7 +352,8 @@
                                         <button class="spinner-btn left" onclick="adjustRate(-0.1)">-0.1</button>
                                         <input type="number" id="targetRate" value="60" oninput="calculate()">
                                         <button class="spinner-btn right" onclick="adjustRate(0.1)">+0.1</button>
-                                        <button class="spinner-btn right last" onclick="adjustRate(1)">+1</button>
+                                        <button class="spinner-btn right" onclick="adjustRate(1)">+1</button>
+                                        <button class="spinner-btn right last" style="color:var(--accent); font-weight:bold;" onclick="setSingleTargetUnit(1)" title="Set target rate to 1 item/min">1x</button>
                                     </div>
                                 </div>
                                 <div class="input-group">
@@ -352,6 +364,7 @@
                                     </div>
                                 </div>
                             </div>
+                            <button id="btn-unit-breakdown" class="split-btn" style="width:100%; margin-top:8px; background:rgba(76,175,80,0.12); border-color:var(--accent); color:var(--accent);" onclick="openUnitCostModal()">📦 1-Unit Material Breakdown</button>
 
                         </div>
 
@@ -438,6 +451,7 @@
                     <div id="summary-icons"></div>
                     <div id="summary-line" style="margin-bottom: 5px;"></div>
                     <div id="equilibrium-warning-line" style="margin: 4px 0 8px; font-size: 0.95em; display:block; color: var(--warn);"></div>
+                    <div id="chain-recipes-container" style="display:none; margin: 6px 0 10px;"></div>
                     <div id="tree"></div>
                 </div>
 

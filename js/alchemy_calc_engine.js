@@ -361,10 +361,10 @@
         if (initialTotalByproducts) aggregates.totalByproducts = initialTotalByproducts;
 
         const fuelDef = db.items[params.selectedFuel] || {};
-        const grossFuelEnergy = (fuelDef.heat || 1) * params.fuelMult;
+        const grossFuelEnergy = (fuelDef.heat || 1) * (params.fuelMult || 1.0);
         const heatingDevice = getHeatingDevice(db, params.selectedHeatingDevice);
         const fertDef = db.items[params.selectedFert] || { nutrientValue: 144, maxFertility: 12 };
-        const grossFertVal = fertDef.nutrientValue * params.fertMult;
+        const grossFertVal = (fertDef.nutrientValue || 144) * (params.fertMult || 1.0);
 
         /* ==========================================================================
             Node invariants
@@ -386,11 +386,20 @@
             const recycleAvailable = availableByproducts[item] || 0;
             let deduction = 0;
             let canRecycle = false;
-            const isExternalInput = state.forcedExternals?.has(pathKey);
+            const isExternalInput = (state?.forcedExternals instanceof Set)
+                ? state.forcedExternals.has(pathKey)
+                : (typeof state?.forcedExternals?.has === 'function'
+                    ? state.forcedExternals.has(pathKey)
+                    : !!state?.forcedExternals?.[pathKey]);
 
             if (recycleAvailable > 0.001) {
                 canRecycle = true;
-                if (state.activeRecyclers?.has(pathKey)) {
+                const isRecycleActive = (state?.activeRecyclers instanceof Set)
+                    ? state.activeRecyclers.has(pathKey)
+                    : (typeof state?.activeRecyclers?.has === 'function'
+                        ? state.activeRecyclers.has(pathKey)
+                        : !!state?.activeRecyclers?.[pathKey]);
+                if (isRecycleActive) {
                     deduction = Math.min(rate, recycleAvailable);
                     availableByproducts[item] -= deduction;
                 }
@@ -424,7 +433,11 @@
                 },
                 canRecycle,
                 recycleAvailable,
-                recycleActive: state.activeRecyclers?.has(pathKey) || false,
+                recycleActive: (state?.activeRecyclers instanceof Set)
+                    ? state.activeRecyclers.has(pathKey)
+                    : (typeof state?.activeRecyclers?.has === 'function'
+                        ? state.activeRecyclers.has(pathKey)
+                        : !!state?.activeRecyclers?.[pathKey]),
                 isExternal: !!isExternalInput,
                 isRaw: false
             };
@@ -1092,6 +1105,183 @@
         };
     }
 
+    function findChainAlternativeRecipes(db, state, targetItem) {
+        if (!db || !targetItem) return [];
+        const visited = new Set();
+        const alternatives = [];
+
+        function getPrimaryRawInputs(recipe, depth = 0) {
+            if (depth > 8 || !recipe || !recipe.inputs || Object.keys(recipe.inputs).length === 0) {
+                return Object.keys(recipe?.outputs || {});
+            }
+            const raws = [];
+            for (const inputItem of Object.keys(recipe.inputs)) {
+                const subRecipes = getRecipesFor(db, inputItem);
+                const subActive = subRecipes.length > 0
+                    ? (state?.preferredRecipes?.[inputItem] ? subRecipes.find(r => r.id === state.preferredRecipes[inputItem]) || subRecipes[0] : subRecipes[0])
+                    : null;
+                if (!subActive || !subActive.inputs || Object.keys(subActive.inputs).length === 0 || subActive.machine === 'Purchasing Portal') {
+                    raws.push(inputItem);
+                } else {
+                    raws.push(...getPrimaryRawInputs(subActive, depth + 1));
+                }
+            }
+            return Array.from(new Set(raws));
+        }
+
+        function walk(item, depth = 0) {
+            if (depth > 20 || visited.has(item)) return;
+            visited.add(item);
+
+            const candidates = getRecipesFor(db, item);
+            if (candidates.length > 1) {
+                const active = getActiveRecipe(db, state, item);
+                const options = candidates.map(r => ({
+                    id: r.id,
+                    machine: r.machine,
+                    inputs: r.inputs,
+                    outputs: r.outputs,
+                    baseTime: r.baseTime,
+                    primaryRaw: getPrimaryRawInputs(r),
+                    isActive: active?.id === r.id
+                }));
+                alternatives.push({
+                    item,
+                    activeRecipeId: active?.id || candidates[0].id,
+                    candidates: options
+                });
+            }
+
+            const currentRecipe = getActiveRecipe(db, state, item);
+            if (currentRecipe && currentRecipe.inputs) {
+                for (const inputItem of Object.keys(currentRecipe.inputs)) {
+                    walk(inputItem, depth + 1);
+                }
+            }
+        }
+
+        walk(targetItem);
+        return alternatives;
+    }
+
+    function computeUnitMaterialBreakdown(db, state, targetItem, params = {}) {
+        if (!db || !db.items || !targetItem || !db.items[targetItem]) return null;
+
+        const engineState = {
+            activeRecyclers: (state?.activeRecyclers instanceof Set)
+                ? state.activeRecyclers
+                : new Set(Object.keys(state?.activeRecyclers || {})),
+            forcedExternals: (state?.forcedExternals instanceof Set)
+                ? state.forcedExternals
+                : new Set(Object.keys(state?.forcedExternals || {})),
+            preferredRecipes: state?.preferredRecipes || db?.settings?.preferredRecipes || {},
+            nodeRecipeOverrides: state?.nodeRecipeOverrides || db?.settings?.nodeRecipeOverrides || {},
+            recipeModifiers: state?.recipeModifiers || db?.settings?.recipeModifiers || {},
+            customCosts: state?.customCosts || db?.settings?.customCosts || {},
+            expandCatalystInputs: state?.expandCatalystInputs || db?.settings?.expandCatalystInputs || {}
+        };
+
+        const calcParams = {
+            targetItem,
+            targetRate: 1,
+            targets: [{ item: targetItem, rate: 1 }],
+            isMulti: false,
+            speedMult: params.speedMult ?? 1.0,
+            alchemyMult: params.alchemyMult ?? 1.0,
+            beltSpeed: params.beltSpeed ?? 60,
+            selectedFuel: params.selectedFuel || "Logs",
+            selectedFert: params.selectedFert || "Rotten Log",
+            selectedHeatingDevice: params.selectedHeatingDevice || "Stone Furnace",
+            selfFuel: false,
+            selfFert: false,
+            showFuelFert: true,
+            showHeatFert: true,
+            fuelMult: params.fuelMult ?? 1.0,
+            fertMult: params.fertMult ?? 1.0,
+            fuelCost: params.fuelCost ?? 0,
+            fertCost: params.fertCost ?? 0,
+            showFuelCost: false,
+            showFertCost: false,
+            sellMult: params.sellMult ?? 1.0,
+            wholesaleMult: params.wholesaleMult ?? 1.0
+        };
+
+        const result = runCalculation({ db, params: calcParams, state: engineState });
+        const targetDef = db.items[targetItem] || {};
+
+        const rawMaterials = [];
+        let totalRawCost = 0;
+        for (const [rawName, qty] of Object.entries(result.summary.rawItems || {})) {
+            const itemDef = db.items[rawName] || {};
+            const customCost = getCustomCost(state, rawName);
+            const unitPrice = customCost !== null ? customCost : (itemDef.buyPrice || 0);
+            const cost = qty * unitPrice;
+            totalRawCost += cost;
+            rawMaterials.push({
+                item: rawName,
+                qty,
+                unitPrice,
+                totalCost: cost,
+                id: itemDef.id ?? 0
+            });
+        }
+
+        for (const [extName, qty] of Object.entries(result.summary.forcedItems || {})) {
+            const itemDef = db.items[extName] || {};
+            const customCost = getCustomCost(state, extName);
+            const unitPrice = customCost !== null ? customCost : (itemDef.buyPrice || 0);
+            const cost = qty * unitPrice;
+            totalRawCost += cost;
+            rawMaterials.push({
+                item: extName,
+                qty,
+                unitPrice,
+                totalCost: cost,
+                id: itemDef.id ?? 0,
+                isExternal: true
+            });
+        }
+
+        const intermediatesMap = {};
+        function collectIntermediates(node) {
+            if (!node) return;
+            if (node.item !== targetItem && !node.isRaw && !node.isExternal) {
+                intermediatesMap[node.item] = (intermediatesMap[node.item] || 0) + (node.netRate || node.requestedRate);
+            }
+            if (node.children) {
+                node.children.forEach(collectIntermediates);
+            }
+        }
+        if (result.treeRoots && result.treeRoots[0]) {
+            collectIntermediates(result.treeRoots[0].root);
+        }
+
+        const intermediates = Object.entries(intermediatesMap).map(([item, qty]) => ({
+            item,
+            qty,
+            id: db.items[item]?.id ?? 0
+        })).sort((a, b) => b.qty - a.qty);
+
+        const chainAlternatives = findChainAlternativeRecipes(db, state, targetItem);
+        const sellPrice = targetDef.sellPrice ? Math.round(targetDef.sellPrice * calcParams.sellMult) : null;
+        const profit = sellPrice !== null && totalRawCost > 0 ? (sellPrice - totalRawCost) : null;
+        const margin = sellPrice !== null && totalRawCost > 0 ? ((sellPrice / totalRawCost) - 1) : null;
+
+        return {
+            targetItem,
+            rawMaterials,
+            intermediates,
+            totalRawCost,
+            totalHeat: result.summary.heatLoad * 60,
+            fuelItems: result.summary.fuelDemandItems,
+            fertItems: result.summary.fertDemandItems,
+            sellPrice,
+            profit,
+            margin,
+            chainAlternatives
+        };
+    }
+
     global.AlchemyCalcEngine = {
         runCalculation,
         getBeltSpeed,
@@ -1107,6 +1297,8 @@
         getProductionFertCost,
         computeParadoxTime,
         computeDecomposeTime,
-        computeDecomposeExp
+        computeDecomposeExp,
+        findChainAlternativeRecipes,
+        computeUnitMaterialBreakdown
     };
 })(window);

@@ -1009,10 +1009,11 @@ function openPlannerRecipePickerMenu(ctx) {
     panel.className = 'planner-recipe-picker';
     document.body.appendChild(panel);
 
-    const headerText = `${t(consuming ? 'CONSUME' : 'PRODUCE', 'ui')} ${ctx.item}`;
+    const headerText = `${t(consuming ? 'CONSUME' : 'PRODUCE', 'ui')} <span style="color:var(--info); font-weight:bold;">${ctx.item}</span>`;
 
     panel.innerHTML = `
         <div class="planner-picker-header">${headerText}</div>
+        <button class="split-btn" style="width:100%; margin-bottom:5px;" onclick="choosePlannerWaypointFromPicker()">+ 📍 Waypoint / Router</button>
         <input type="text" class="planner-picker-search" placeholder="${t('Search...', 'ui')}"
                oninput="filterPlannerRecipePicker(this.value)">
         <div class="planner-picker-list" id="planner-picker-list"></div>

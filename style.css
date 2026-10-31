@@ -1042,3 +1042,9 @@ button.reset-btn:hover { background: var(--danger); color: white; }
 .planner-mismatch-btn span:nth-child(2) {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+
+
+
+.planner-node.node-done { background: #2d5a2d !important; border-color: #4CAF50 !important; opacity: 0.9; filter: none; }
+.planner-node.node-done .planner-node-header { border-bottom: 2px solid #4CAF50; }

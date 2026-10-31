@@ -722,7 +722,7 @@ function onPlannerAddNoteClick() {
     const { graphX, graphY } = _plannerGetCenterGraphPos();
     plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
     const id = 'pnode_' + plannerState._nodeSeq;
-    plannerState.nodes[id] = { id, kind: 'note', text: '', color: '#1a2c32', w: 200, h: 160, x: Math.round(graphX), y: Math.round(graphY) };
+    plannerState.nodes[id] = { id, kind: 'note', text: '', color: '#1a2c32', w: 200, h: 160, x: Math.round(graphX + Math.random() * 20), y: Math.round(graphY + Math.random() * 20) };
     renderPlanner(); savePlannerState();
 }
 
@@ -733,7 +733,14 @@ function onPlannerAddPortalClick() {
 
 function onPlannerAddWaypointClick() {
     const { graphX, graphY } = _plannerGetCenterGraphPos();
-    openPlannerItemPicker(graphX, graphY, 'waypoint');
+    plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
+    const newNodeId = 'pnode_' + plannerState._nodeSeq;
+    plannerState.nodes[newNodeId] = {
+        id: newNodeId, kind: 'waypoint', portalItem: 'Any', machineCount: 1,
+        x: Math.round(graphX + Math.random() * 20), y: Math.round(graphY + Math.random() * 20)
+    };
+    savePlannerState();
+    renderPlanner();
 }
 
 function onPlannerCanvasContextMenu(e) {
@@ -760,7 +767,7 @@ function addPlannerNode(itemName, graphX, graphY, kind = 'recipe') {
     if (kind === 'portal' || kind === 'waypoint') {
         plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
         const id = 'pnode_' + plannerState._nodeSeq;
-        plannerState.nodes[id] = { id, kind, portalItem: itemName, machineCount: 1, x: Math.round(graphX), y: Math.round(graphY) };
+        plannerState.nodes[id] = { id, kind, portalItem: itemName, machineCount: 1, x: Math.round(graphX + Math.random() * 20), y: Math.round(graphY + Math.random() * 20) };
         renderPlanner(); savePlannerState();
         return;
     }
@@ -847,6 +854,7 @@ function createPlannerNodeEl(node, flows) {
     wrap.id = 'planner-node-' + node.id;
     wrap.style.left = node.x + 'px';
     wrap.style.top = node.y + 'px';
+    if (node.isDone) { wrap.classList.add('node-done'); wrap.style.backgroundColor = '#2d5a2d'; wrap.style.borderColor = '#4CAF50'; }
 
     if (node.kind === 'note') return renderPlannerNoteNode(wrap, node);
     if (node.kind === 'portal') return renderPlannerPortalNode(wrap, node, flows);
@@ -871,6 +879,7 @@ function createPlannerNodeEl(node, flows) {
                 onmouseleave="hidePlannerRateTooltip()">
                 ${machineIconHtml}
                 <span class="planner-node-title">${machineName}</span>            
+                <button class="planner-gear-btn ${node.isDone ? 'done-active' : ''}" title="${t('Toggle Done', 'ui')}" style="${node.isDone ? 'color:#4CAF50; font-weight:bold;' : ''}" onclick="event.stopPropagation(); togglePlannerNodeDone('${node.id}')">✔</button>
                 <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
                 <button class="planner-close-btn" title="${t('Remove Node', 'ui')}" onclick="removePlannerNode('${node.id}')">✕</button>
             </div>`;
@@ -883,7 +892,8 @@ function createPlannerNodeEl(node, flows) {
             onmouseenter="onPlannerHeaderHover(this, '${node.id}')"
             onmouseleave="hidePlannerRateTooltip()">
             <span class="planner-node-title">${titleName}</span>            
-            <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
+            <button class="planner-gear-btn ${node.isDone ? 'done-active' : ''}" title="${t('Toggle Done', 'ui')}" style="${node.isDone ? 'color:#4CAF50; font-weight:bold;' : ''}" onclick="event.stopPropagation(); togglePlannerNodeDone('${node.id}')">✔</button>
+                <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
             <button class="planner-close-btn" title="${t('Remove Node', 'ui')}" onclick="removePlannerNode('${node.id}')">✕</button>
         </div>`;
     }
@@ -947,6 +957,7 @@ function renderPlannerPortalNode(wrap, node, flows) {
     if (isReversed) {
         wrap.classList.add('reversed');
     }
+    if (node.isDone) { wrap.classList.add('node-done'); wrap.style.backgroundColor = '#2d5a2d'; wrap.style.borderColor = '#4CAF50'; }
 
     const errorMessageHtml = ports.errorCode 
         ? `<div>${t('Error')}: ${t(ports.errorCode, 'ui')}</div>` 
@@ -960,7 +971,8 @@ function renderPlannerPortalNode(wrap, node, flows) {
             <span class="planner-node-title" onclick="event.stopPropagation(); plannerPickPortalItem('${node.id}')">
                 ${_plannerEscapeHtml(title)}
             </span>
-            <button class="planner-gear-btn" title="switch direction" onclick="event.stopPropagation(); plannerToggleNodeDirection('${node.id}')">
+            <button class="planner-gear-btn ${node.isDone ? 'done-active' : ''}" title="${t('Toggle Done', 'ui')}" style="${node.isDone ? 'color:#4CAF50; font-weight:bold;' : ''}" onclick="event.stopPropagation(); togglePlannerNodeDone('${node.id}')">✔</button>
+                <button class="planner-gear-btn" title="switch direction" onclick="event.stopPropagation(); plannerToggleNodeDirection('${node.id}')">
                 ⇄
             </button>
             <button class="planner-close-btn" onclick="removePlannerNode('${node.id}')">
@@ -1630,23 +1642,45 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
     if (!targetNodeEl) return;
     const targetNodeId = targetNodeEl.id.replace('planner-node-', '');
     const targetItem = targetDotEl.dataset.item;
-    const targetDir = targetDotEl.dataset.dir;
+    let targetDir = targetDotEl.dataset.dir;
+    
+    // If we dropped on a waypoint, dynamically choose the opposite port so it always connects!
+    const targetNodeKind = targetNodeEl.dataset.kind || (plannerState.nodes[targetNodeId] ? plannerState.nodes[targetNodeId].kind : '');
+    if (targetNodeKind === 'waypoint' && targetDir === sourceDir) {
+        targetDir = sourceDir === 'out' ? 'in' : 'out';
+        // We don't even need to change targetDotEl because the logic below only cares about targetDir and targetItem!
+    }
 
-    if (targetItem !== item) { console.log(t('Ports must be the same item to connect.', 'ui')); return; }
+    if (targetItem !== item && targetItem !== 'Any' && item !== 'Any') { console.log(t('Ports must be the same item to connect.', 'ui')); return; }
     if (targetDir === sourceDir) { console.log(t('Cannot connect two ports of the same direction.', 'ui')); return; }
+
+    // If one of them is 'Any' (Waypoint), update it to the real item
+    let finalItem = item;
+    if (targetItem === 'Any' || item === 'Any') {
+        const realItem = targetItem === 'Any' ? item : targetItem;
+        if (realItem !== 'Any') finalItem = realItem;
+        const anyNodeId = targetItem === 'Any' ? targetNodeId : sourceNodeId;
+        const anyNode = plannerState.nodes[anyNodeId];
+        if (anyNode && anyNode.kind === 'waypoint') {
+            anyNode.portalItem = realItem;
+            // Also need to re-render to update the ports
+            
+        }
+    }
 
     const fromNode = sourceDir === 'out' ? sourceNodeId : targetNodeId;
     const toNode = sourceDir === 'out' ? targetNodeId : sourceNodeId;
 
     const dup = Object.values(plannerState.edges).some(e =>
-        e.fromNode === fromNode && e.toNode === toNode && e.item === item);
+        e.fromNode === fromNode && e.toNode === toNode && e.item === finalItem);
     if (dup) { console.log(t('These two ports are already connected.', 'ui')); return; }
 
     plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
     const edgeId = 'pedge_' + plannerState._edgeSeq;
-    plannerState.edges[edgeId] = { id: edgeId, item, fromNode, toNode, createdAt: plannerState._edgeSeq };
+    plannerState.edges[edgeId] = { id: edgeId, item: finalItem, fromNode, toNode, createdAt: plannerState._edgeSeq };
 
-    let flows = recomputeAndRefreshPlanner();
+    let flows = plannerResolveFlows();
+    renderPlanner();
 
     // 從 sourceNode 的輸入端拉線連接時，若連上後 sourceNode 對此 item 仍然短缺，
     // 自動提升 targetNode 的機器數以補足短缺量。
@@ -1726,37 +1760,53 @@ function renderPlannerEmptyHint() {
 }
 
 function renderPlannerWaypointNode(wrap, node, flows) {
-    const ports = flows.nodePortsCache[node.id] || computeNodePorts(node);
-    
-    wrap.style.width = '24px';
-    wrap.style.height = '24px';
+    // Clear default node styles
+    wrap.style.backgroundColor = 'var(--bg-light)';
+    wrap.style.borderColor = 'var(--accent)';
+    wrap.style.width = '16px';
+    wrap.style.height = '16px';
     wrap.style.borderRadius = '50%';
-    wrap.style.background = 'var(--accent)';
-    wrap.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
-    wrap.style.display = 'flex';
-    wrap.style.alignItems = 'center';
-    wrap.style.justifyContent = 'center';
-    wrap.style.cursor = 'move';
+    wrap.style.border = '2px solid var(--border)';
+    wrap.style.boxShadow = '0 0 6px rgba(0,0,0,0.5)';
+    wrap.style.cursor = 'pointer';
     wrap.style.zIndex = '10';
+    wrap.style.padding = '0';
+    wrap.style.display = 'block';
+    wrap.style.marginLeft = '-8px';
+    wrap.style.marginTop = '-8px';
 
-    let portsHtml = '';
-    ports.inputs.forEach(p => {
-        portsHtml += `<div class="planner-port planner-port-in" data-node="${node.id}" data-item="${p.item}" data-dir="in" style="position:absolute; left:-6px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--bg-light); border:2px solid var(--accent);"></div>`;
-    });
-    ports.outputs.forEach(p => {
-        portsHtml += `<div class="planner-port planner-port-out" data-node="${node.id}" data-item="${p.item}" data-dir="out" style="position:absolute; right:-6px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--bg-light); border:2px solid var(--accent);"></div>`;
-    });
+    const item = node.portalItem || 'Any';
+    const outKey = plannerPortKey(node.id, item, 'out');
+    const inKey = plannerPortKey(node.id, item, 'in');
+    
+    // Check if it's fully connected (both in and out) to color it green
+    const connectedIn = flows && flows.portConnections[inKey] && flows.portConnections[inKey].length > 0;
+    const connectedOut = flows && flows.portConnections[outKey] && flows.portConnections[outKey].length > 0;
+    if (connectedIn || connectedOut) {
+        wrap.style.borderColor = '#4CAF50';
+        wrap.style.backgroundColor = '#1b3320';
+    }
 
+    wrap.ondblclick = (e) => {
+        e.stopPropagation();
+        removePlannerNode(node.id);
+    };
+
+    // Invisible ports covering the entire dot so that connections snap to the center
     wrap.innerHTML = `
-        <div class="planner-node-header" style="position:absolute; top:0; left:0; right:0; bottom:0; background:transparent; border:none; z-index:1; border-radius:50%;"></div>
-        <div style="pointer-events:none; font-size:12px; opacity:0.8; z-index:2; position:relative;">📍</div>
-        ${portsHtml}
-        <button class="planner-close-btn" title="${t('Remove', 'ui')}" style="position:absolute; top:-10px; right:-10px; width:16px; height:16px; font-size:10px; padding:0; display:none; z-index:10;" onclick="removePlannerNode('${node.id}')">✖</button>
+        <div class="planner-port planner-port-dot planner-port-in" data-node="${node.id}" data-item="${item}" data-dir="in" style="position:absolute; width:100%; height:100%; opacity:0;"></div>
+        <div class="planner-port planner-port-dot planner-port-out" data-node="${node.id}" data-item="${item}" data-dir="out" style="position:absolute; width:100%; height:100%; opacity:0;"></div>
     `;
 
-    wrap.onmouseenter = () => { const btn = wrap.querySelector('.planner-close-btn'); if(btn) btn.style.display = 'block'; };
-    wrap.onmouseleave = () => { const btn = wrap.querySelector('.planner-close-btn'); if(btn) btn.style.display = 'none'; };
-    
-    attachPlannerNodeDrag(wrap, node);
+    // No drag attached -> immovable
     return wrap;
+}
+
+function togglePlannerNodeDone(nodeId) {
+    const node = plannerState.nodes[nodeId];
+    if (node) {
+        node.isDone = !node.isDone;
+        savePlannerState();
+        renderPlanner();
+    }
 }

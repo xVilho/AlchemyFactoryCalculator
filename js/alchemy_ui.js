@@ -1151,6 +1151,23 @@ function openUnitCostModal() {
                 </div>
         `;
 
+        if (data.totalHeat > 0 || data.heatingCost > 0) {
+            summaryHtml += `
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Heating Cost')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--fuel);">${formatCoins(data.heatingCost)}</span>
+                </div>
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Total Cost (inc. Heat)')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--gold); font-size:1.1em;">${formatCoins(data.totalUnitCost)}</span>
+                </div>
+                <div class="unit-cost-summary-item">
+                    <span class="unit-cost-summary-label">${t('Heat Load')}</span>
+                    <span class="unit-cost-summary-val" style="color:var(--fuel);">${Number(data.totalHeat.toFixed(1))} P</span>
+                </div>
+            `;
+        }
+
         if (data.sellPrice) {
             summaryHtml += `
                 <div class="unit-cost-summary-item">
@@ -1168,15 +1185,6 @@ function openUnitCostModal() {
                 <div class="unit-cost-summary-item">
                     <span class="unit-cost-summary-label">${t('Net Margin')}</span>
                     <span class="unit-cost-summary-val" style="color:${color};">${sign}${formatCoins(data.profit)} (${sign}${marginPct}%)</span>
-                </div>
-            `;
-        }
-
-        if (data.totalHeat > 0) {
-            summaryHtml += `
-                <div class="unit-cost-summary-item">
-                    <span class="unit-cost-summary-label">${t('Heat Load')}</span>
-                    <span class="unit-cost-summary-val" style="color:var(--fuel);">${Number(data.totalHeat.toFixed(1))} P</span>
                 </div>
             `;
         }
@@ -1265,7 +1273,32 @@ function openUnitCostModal() {
             intermediateSectionHtml += `</div></div>`;
         }
 
-        body.innerHTML = summaryHtml + altSectionHtml + rawSectionHtml + intermediateSectionHtml;
+        // Section: Heating & Fuel Demand
+        let heatSectionHtml = '';
+        if (data.totalHeat > 0) {
+            heatSectionHtml = `
+                <div class="unit-modal-section">
+                    <div class="unit-modal-section-title">🔥 ${t('Heating & Fuel Demand')}</div>
+                    <div class="unit-mats-grid">
+                        <div class="unit-mat-card">
+                            <div class="unit-mat-info">
+                                <img src="img/item${data.fuelId}.png" width="24" height="24">
+                                <div>
+                                    <strong>${data.selectedFuel}</strong>
+                                    <div style="font-size:0.8em; color:#888;">${formatCoins(data.fuelUnitPrice)} ${t('each')} · ${Number(data.totalHeat.toFixed(1))} P</div>
+                                </div>
+                            </div>
+                            <div class="unit-mat-cost">
+                                <strong style="color:var(--fuel); font-size:1.05em;">× ${Number(data.fuelQty.toFixed(4))}</strong>
+                                <div style="color:var(--gold); font-size:0.9em;">${formatCoins(data.heatingCost)}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        body.innerHTML = summaryHtml + altSectionHtml + rawSectionHtml + heatSectionHtml + intermediateSectionHtml;
         const modal = document.getElementById('unit-cost-modal');
         if (modal) modal.style.display = 'flex';
     } catch (err) {

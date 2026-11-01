@@ -461,7 +461,7 @@
                 }
             }
 
-            if (isExternalInput || depth >= 20 || !shouldExpand) {
+            if (isExternalInput || depth >= 40 || !shouldExpand) {
                 if (!effectiveGhost && netRate > 0) {
                     aggregates.forcedItems[item] = (aggregates.forcedItems[item] || 0) + netRate;
                     pushExternalSource(aggregates, item, { rate: netRate, pathKey });
@@ -1111,7 +1111,7 @@
         const alternatives = [];
 
         function getPrimaryRawInputs(recipe, depth = 0) {
-            if (depth > 8 || !recipe || !recipe.inputs || Object.keys(recipe.inputs).length === 0) {
+            if (depth > 25 || !recipe || !recipe.inputs || Object.keys(recipe.inputs).length === 0) {
                 return Object.keys(recipe?.outputs || {});
             }
             const raws = [];
@@ -1130,7 +1130,7 @@
         }
 
         function walk(item, depth = 0) {
-            if (depth > 20 || visited.has(item)) return;
+            if (depth > 40 || visited.has(item)) return;
             visited.add(item);
 
             const candidates = getRecipesFor(db, item);
@@ -1192,8 +1192,8 @@
             selectedFuel: params.selectedFuel || "Logs",
             selectedFert: params.selectedFert || "Rotten Log",
             selectedHeatingDevice: params.selectedHeatingDevice || "Stone Furnace",
-            selfFuel: false,
-            selfFert: false,
+            selfFuel: params.selfFuel ?? false,
+            selfFert: params.selfFert ?? false,
             showFuelFert: true,
             showHeatFert: true,
             fuelMult: params.fuelMult ?? 1.0,
@@ -1263,9 +1263,31 @@
         })).sort((a, b) => b.qty - a.qty);
 
         const chainAlternatives = findChainAlternativeRecipes(db, state, targetItem);
+
+        const fuelDef = db.items[calcParams.selectedFuel] || {};
+        const fuelCustomCost = getCustomCost(state, calcParams.selectedFuel);
+        const fuelUnitPrice = fuelCustomCost !== null
+            ? fuelCustomCost
+            : (params.fuelCost > 0
+                ? params.fuelCost
+                : (fuelDef.buyPrice || fuelDef.baseCost || 0));
+        const fuelQty = result.summary.fuelDemandItems || 0;
+        const heatingCost = fuelQty * fuelUnitPrice;
+
+        const fertDef = db.items[calcParams.selectedFert] || {};
+        const fertCustomCost = getCustomCost(state, calcParams.selectedFert);
+        const fertUnitPrice = fertCustomCost !== null
+            ? fertCustomCost
+            : (params.fertCost > 0
+                ? params.fertCost
+                : (fertDef.buyPrice || fertDef.baseCost || 0));
+        const fertQty = result.summary.fertDemandItems || 0;
+        const fertCost = fertQty * fertUnitPrice;
+
+        const totalUnitCost = totalRawCost + heatingCost + fertCost;
         const sellPrice = targetDef.sellPrice ? Math.round(targetDef.sellPrice * calcParams.sellMult) : null;
-        const profit = sellPrice !== null && totalRawCost > 0 ? (sellPrice - totalRawCost) : null;
-        const margin = sellPrice !== null && totalRawCost > 0 ? ((sellPrice / totalRawCost) - 1) : null;
+        const profit = sellPrice !== null && totalUnitCost > 0 ? (sellPrice - totalUnitCost) : null;
+        const margin = sellPrice !== null && totalUnitCost > 0 ? ((sellPrice / totalUnitCost) - 1) : null;
 
         return {
             targetItem,
@@ -1273,8 +1295,16 @@
             intermediates,
             totalRawCost,
             totalHeat: result.summary.heatLoad * 60,
-            fuelItems: result.summary.fuelDemandItems,
-            fertItems: result.summary.fertDemandItems,
+            selectedFuel: calcParams.selectedFuel,
+            fuelQty,
+            fuelUnitPrice,
+            heatingCost,
+            fuelId: fuelDef.id ?? 0,
+            selectedFert: calcParams.selectedFert,
+            fertQty,
+            fertUnitPrice,
+            fertCost,
+            totalUnitCost,
             sellPrice,
             profit,
             margin,

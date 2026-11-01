@@ -136,6 +136,12 @@ window.ALCHEMY_DB = {
 
         // --- MASH ---
         "Sand": { "id": 202, "category": "Mash", "baseCost": 4, "cauldronCost": 4.5, "paradoxTime": 333.333, "tier": 2 },
+        "Refined Sand (T1)": { "id": 202, "category": "Mash", "baseCost": 8, "tier": 2 },
+        "Refined Sand (T2)": { "id": 202, "category": "Mash", "baseCost": 16, "tier": 3 },
+        "Refined Sand (T3)": { "id": 202, "category": "Mash", "baseCost": 32, "tier": 3 },
+        "Refined Sand (T4)": { "id": 202, "category": "Mash", "baseCost": 64, "tier": 4 },
+        "Refined Sand (T5)": { "id": 202, "category": "Mash", "baseCost": 128, "tier": 5 },
+        "Fully Refined Sand": { "id": 202, "category": "Mash", "baseCost": 256, "tier": 6 },
         "Quicklime": { "id": 401, "category": "Mash", "baseCost": 6, "cauldronCost": 6, "cauldronMulti": 1, "cauldronTarget": 6, "tier": 3 },
         "Quicklime Powder": { "id": 402, "category": "Mash", "baseCost": 6, "cauldronCost": 7, "tier": 3 },
         "Clay Powder": { "id": 407, "category": "Mash", "baseCost": 20, "cauldronCost": 22, "tier": 4 },
@@ -526,7 +532,14 @@ window.ALCHEMY_DB = {
         { "id": "Adamant", "machine": "Refiner", "inputs": { "Polished Crystal": 2 }, "outputs": { "Adamant": 1 }, "baseTime": 3.0 },
         { "id": "Diamond", "machine": "Refiner", "inputs": { "Adamant": 2 }, "outputs": { "Diamond": 1 }, "baseTime": 3.0 },
         { "id": "Perfect Diamond", "machine": "Refiner", "inputs": { "Diamond": 2 }, "outputs": { "Perfect Diamond": 1 }, "baseTime": 3.0 },
-        { "id": "Refined Sand", "machine": "Refiner", "inputs": { "Sand": 128 }, outputs: { "Crude Shard": 1 }, "baseTime": 381 },
+        // Sand refine 7 times to become Crude Shard (Sand -> T1 -> T2 -> T3 -> T4 -> T5 -> Fully Refined Sand -> Crude Shard)
+        { "id": "Refined Sand (T1)", "machine": "Refiner", "inputs": { "Sand": 2 }, "outputs": { "Refined Sand (T1)": 1 }, "baseTime": 3.0 },
+        { "id": "Refined Sand (T2)", "machine": "Refiner", "inputs": { "Refined Sand (T1)": 2 }, "outputs": { "Refined Sand (T2)": 1 }, "baseTime": 3.0 },
+        { "id": "Refined Sand (T3)", "machine": "Refiner", "inputs": { "Refined Sand (T2)": 2 }, "outputs": { "Refined Sand (T3)": 1 }, "baseTime": 3.0 },
+        { "id": "Refined Sand (T4)", "machine": "Refiner", "inputs": { "Refined Sand (T3)": 2 }, "outputs": { "Refined Sand (T4)": 1 }, "baseTime": 3.0 },
+        { "id": "Refined Sand (T5)", "machine": "Refiner", "inputs": { "Refined Sand (T4)": 2 }, "outputs": { "Refined Sand (T5)": 1 }, "baseTime": 3.0 },
+        { "id": "Fully Refined Sand", "machine": "Refiner", "inputs": { "Refined Sand (T5)": 2 }, "outputs": { "Fully Refined Sand": 1 }, "baseTime": 3.0 },
+        { "id": "Refined Sand", "machine": "Refiner", "inputs": { "Fully Refined Sand": 2 }, "outputs": { "Crude Shard": 1 }, "baseTime": 3.0 },
 
         // --- GEM PRODUCTS ---
         { "id": "Turquoise", "machine": "Assembler", "inputs": { "Healing Potion": 2, "Sand": 12 }, "outputs": { "Turquoise": 1 }, "baseTime": 12.0 },

@@ -473,6 +473,7 @@ function renderCandidatePool() {
     const cauldronSortDescending = document.getElementById('cauldron-sort-order-btn').innerText === '🔽';
     const container = document.getElementById('candidate-pool');
     container.innerHTML = '';
+    const searchText = (document.getElementById('cauldron-cand-search')?.value || '').trim().toLowerCase();
 
     let array = [];
     Object.keys(DB.items).forEach(name => {
@@ -486,6 +487,10 @@ function renderCandidatePool() {
                           (item.category === cauldronCatFilter);
 
         if (!isVisible) return;
+        if (searchText) {
+            const altName = (typeof queryDualItemName === 'function' ? queryDualItemName(name) : '') || '';
+            if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return;
+        }
         array.push({name: name, cost:item.cauldronCost||0, target:item.cauldronTarget||0, id:item.id||0});
     });
 
@@ -582,9 +587,14 @@ function toggleCandidate(name) {
 }
 
 function bulkToggleCandidates(check) {
+    const searchText = (document.getElementById('cauldron-cand-search')?.value || '').trim().toLowerCase();
     Object.keys(DB.items).forEach(name => {
         const item = DB.items[name];
         if (!isVaildCandidate(name)) return;
+        if (searchText) {
+            const altName = (typeof queryDualItemName === 'function' ? queryDualItemName(name) : '') || '';
+            if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return;
+        }
 
         const isMatch = (cauldronCatFilter === "[All]") || 
                         (cauldronCatFilter === "[Include]" && cauldronCandidates.has(name)) ||
@@ -1342,7 +1352,7 @@ function renderCauldronResults(data) {
                 <span class="push-right">
                 <div class="details help-tag" title="${t('Cauldron Target')}">T: ${outputItem.cauldronTarget}</div>
             </div>
-            <div class="node-children" style="max-height: 300px; overflow-y: auto;">
+            <div class="node-children">
                 <div class="loading-placeholder" style="padding:10px; color:#666; font-size:0.8em;">Loading recipes...</div>
             </div>
         `;

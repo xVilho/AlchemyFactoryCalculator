@@ -317,8 +317,9 @@ function switchTab(tabName, updateUrl = true) {
         case 'calc': btnIndex = 0; break;
         case 'cauldron': btnIndex = 1; break;
         case 'planner': btnIndex = 2; break;
-        case 'help': btnIndex = 3; break;
-        case 'db': btnIndex = 4; break;
+        case 'exp': btnIndex = 3; break;
+        case 'help': btnIndex = 4; break;
+        case 'db': btnIndex = 5; break;
         default: return;
     }
     document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
@@ -340,6 +341,9 @@ function switchTab(tabName, updateUrl = true) {
     }
     if (tabName === 'planner' && typeof initPlannerPage === 'function') {
         initPlannerPage();
+    }
+    if (tabName === 'exp' && typeof initExpPage === 'function') {
+        initExpPage();
     }
     if (tabName === 'calc') {
         syncCauldronToMainDB(); // 回到計算器頁面時, 嘗試同步煉金鍋配方

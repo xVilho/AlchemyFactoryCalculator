@@ -75,6 +75,7 @@
             <div class="tab-btn active" onclick="switchTab('calc')">Calculator</div>
             <div class="tab-btn" onclick="switchTab('cauldron')">Cauldron</div>
             <div class="tab-btn" onclick="switchTab('planner')">Planner</div>
+            <div class="tab-btn" onclick="switchTab('exp')">EXP</div>
             <div class="tab-btn" onclick="switchTab('help')">Wiki</div>
             <div class="tab-btn" onclick="switchTab('db')">Database Editor</div>
         </div>
@@ -566,6 +567,7 @@
                         <button id="cauldron-tab-1" class="tab-btn mini-tab" onclick="switchCauldronProfile(1)">Profile 2</button>
                         <button id="cauldron-tab-2" class="tab-btn mini-tab" onclick="switchCauldronProfile(2)">Profile 3</button>
                     </div>
+                    <input type="search" id="cauldron-cand-search" class="cauldron-cand-search" placeholder="🔍 Search candidates..." oninput="renderCandidatePool()" autocomplete="off">
                     <div class="input-group" style="margin-bottom:2px;">
                         <label for="cauldron-cat-select">Filter Category</label>
                         <select id="cauldron-cat-select" onchange="renderCandidatePool()"></select>
@@ -737,6 +739,8 @@
             </div>
         </div>
 
+        <div id="view-exp" class="view"></div>
+
         <div id="view-help" class="view"></div>
 
         <div id="view-db" class="view">
@@ -768,5 +772,6 @@
     <script src="js/alchemy_planner.js"></script>
     <script src="js/alchemy_planner_calc.js"></script>
     <script src="js/alchemy_planner_overlays.js"></script>
+    <script src="js/alchemy_exp.js"></script>
 </body>
 </html>

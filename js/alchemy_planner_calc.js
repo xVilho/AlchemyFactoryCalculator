@@ -57,6 +57,14 @@ function getPlannerModulesUsingPlan(planId) {
    SECTION: RECIPE / RATE CALCULATION
    ========================================================================== */
 
+const PLANNER_STEAM_HEAT_VALUE = 20; // 1 Steam = 20 P (Steam Boiler: 3000 P/s -> 150 Steam/s)
+
+/** Heated machines consume Steam instead of fuel when the global heating device is the Steam Heating Pad.
+ *  The Steam Boiler itself always burns fuel (otherwise it would need its own output). */
+function plannerUsesSteamHeat(recipe) {
+    return DB.settings.selectedHeatingDevice === 'Steam Heating Pad' && recipe && recipe.machine !== 'Steam Boiler';
+}
+
 function plannerGetRawRecipe(recipeId) {
     return (DB.recipes || []).find(r => r.id === recipeId) || null;
 }
@@ -154,9 +162,18 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
         const heatingDevicesNeededPerMachine = 1 / (heatingSlots / slotsRequired);
         const totalHeatPerSecPerMachine = heatingDevicesNeededPerMachine * (heatingDevice.heatSelf || 0) * speedMult
             + activeHeat;
-        const fuelDef = DB.items[DB.settings.defaultFuel] || {};
-        const grossFuelEnergy = (fuelDef.heat || 1) * (1 + lvlFuel * 0.10);
-        heatItemsPerMachine = (totalHeatPerSecPerMachine * 60) / grossFuelEnergy;
+        if (plannerUsesSteamHeat(recipe)) {
+            // Steam Heating Pad: heat is delivered as Steam (20 P per Steam), exposed as a real
+            // input port so it can be wired to Steam Boiler nodes / auto-generated upstream.
+            const steamRate = (totalHeatPerSecPerMachine * 60) / PLANNER_STEAM_HEAT_VALUE;
+            const existing = inputsPerMachine.find(p => p.item === 'Steam');
+            if (existing) existing.rate += steamRate;
+            else inputsPerMachine.push({ item: 'Steam', rate: steamRate });
+        } else {
+            const fuelDef = DB.items[DB.settings.defaultFuel] || {};
+            const grossFuelEnergy = (fuelDef.heat || 1) * (1 + lvlFuel * 0.10);
+            heatItemsPerMachine = (totalHeatPerSecPerMachine * 60) / grossFuelEnergy;
+        }
     }
 
     // 肥料消耗 (Nursery, 每台機器)
@@ -343,63 +360,76 @@ function plannerResolveFlows(planData = null) {
     const portConnections = {};
     const edgeFlow = {};
 
-    const sortedEdges = Object.values(planData.edges).sort((a, b) => a.createdAt - b.createdAt);
-    sortedEdges.forEach(edge => {
+    const isWaypoint = id => planData.nodes[id]?.kind === 'waypoint';
+    const allEdges = Object.values(planData.edges);
+    allEdges.forEach(edge => {
+        edgeFlow[edge.id] = 0;
         const outKey = plannerPortKey(edge.fromNode, edge.item, 'out');
         const inKey = plannerPortKey(edge.toNode, edge.item, 'in');
         (portConnections[outKey] = portConnections[outKey] || []).push(edge.id);
         (portConnections[inKey] = portConnections[inKey] || []).push(edge.id);
-
-        let supply = portRemaining[outKey] ?? 0;
-        let demand = portRemaining[inKey] ?? 0;
-
-        const fromNode = planData.nodes[edge.fromNode];
-        const toNode = planData.nodes[edge.toNode];
-        
-        // Portals act as perfect passthroughs, they do not bottleneck the flow
-        if (fromNode && fromNode.kind === 'waypoint') supply = 99999999;
-        if (toNode && toNode.kind === 'waypoint') demand = 99999999;
-
-        const flow = Math.max(0, Math.min(supply, demand));
-        edgeFlow[edge.id] = flow;
-        
-        if (!fromNode || fromNode.kind !== 'waypoint') portRemaining[outKey] = (portRemaining[outKey] ?? 0) - flow;
-        if (!toNode || toNode.kind !== 'waypoint') portRemaining[inKey] = (portRemaining[inKey] ?? 0) - flow;
     });
 
-    // Auto-update Portal theoretical rates and remaining values so they perfectly reflect the flow
-    Object.values(planData.nodes).forEach(node => {
-        if (node.kind === 'waypoint') {
-            const ports = nodePortsCache[node.id];
-            if (!ports) return;
-            let maxFlow = 0;
-            
-            ports.inputs.forEach(p => {
-                const inKey = plannerPortKey(node.id, p.item, 'in');
-                const outKey = plannerPortKey(node.id, p.item, 'out');
-                
-                let inFlow = 0;
-                let outFlow = 0;
-                
-                (portConnections[inKey] || []).forEach(eid => inFlow += edgeFlow[eid]);
-                (portConnections[outKey] || []).forEach(eid => outFlow += edgeFlow[eid]);
-                
-                const totalFlow = Math.max(inFlow, outFlow);
-                maxFlow = Math.max(maxFlow, totalFlow);
-                
-                portTheoretical[inKey] = totalFlow;
-                portTheoretical[outKey] = totalFlow;
-                portRemaining[inKey] = totalFlow - inFlow;
-                portRemaining[outKey] = totalFlow - outFlow;
-                
-                p.rate = totalFlow; // Update UI rate visually
-            });
-            ports.outputs.forEach(p => {
-                p.rate = portTheoretical[plannerPortKey(node.id, p.item, 'out')] || 0;
-            });
-            
-            node.machineCount = maxFlow || 1;
+    // Waypoints are pure routing: they neither produce nor consume. Every chain
+    // realSource -> waypoint(s) -> realSink is resolved as one "virtual" edge between the
+    // two real ports, so a waypoint can only pass on what its sources actually supply.
+    // The resulting flow is then written back onto every visual edge along the path.
+    const outEdgesOf = {};
+    allEdges.forEach(e => { (outEdgesOf[e.fromNode] = outEdgesOf[e.fromNode] || []).push(e); });
+    const flowEdges = [];
+    allEdges.forEach(edge => {
+        if (isWaypoint(edge.fromNode)) return; // routes are enumerated from their real source only
+        if (!isWaypoint(edge.toNode)) {
+            flowEdges.push({ fromNode: edge.fromNode, toNode: edge.toNode, item: edge.item, order: edge.createdAt, tie: edge.createdAt, path: [edge.id] });
+            return;
         }
+        const seenSinks = new Set();
+        const walk = (wpId, path, visited, maxOrder) => {
+            (outEdgesOf[wpId] || []).forEach(next => {
+                if (next.item !== edge.item || visited.has(next.toNode)) return;
+                const nextPath = [...path, next.id];
+                const order = Math.max(maxOrder, next.createdAt);
+                if (isWaypoint(next.toNode)) {
+                    walk(next.toNode, nextPath, new Set([...visited, next.toNode]), order);
+                } else if (!seenSinks.has(next.toNode)) {
+                    seenSinks.add(next.toNode);
+                    flowEdges.push({ fromNode: edge.fromNode, toNode: next.toNode, item: edge.item, order, tie: edge.createdAt, path: nextPath });
+                }
+            });
+        };
+        walk(edge.toNode, [edge.id], new Set([edge.toNode]), edge.createdAt);
+    });
+
+    flowEdges.sort((a, b) => (a.order - b.order) || (a.tie - b.tie));
+    flowEdges.forEach(fe => {
+        const outKey = plannerPortKey(fe.fromNode, fe.item, 'out');
+        const inKey = plannerPortKey(fe.toNode, fe.item, 'in');
+        const flow = Math.max(0, Math.min(portRemaining[outKey] ?? 0, portRemaining[inKey] ?? 0));
+        portRemaining[outKey] = (portRemaining[outKey] ?? 0) - flow;
+        portRemaining[inKey] = (portRemaining[inKey] ?? 0) - flow;
+        fe.path.forEach(eid => { edgeFlow[eid] += flow; });
+    });
+
+    // Waypoint ports simply display the throughput; they never count as surplus/shortage.
+    Object.values(planData.nodes).forEach(node => {
+        if (node.kind !== 'waypoint') return;
+        const ports = nodePortsCache[node.id];
+        if (!ports) return;
+        let maxFlow = 0;
+        ports.inputs.forEach(p => {
+            const inKey = plannerPortKey(node.id, p.item, 'in');
+            const outKey = plannerPortKey(node.id, p.item, 'out');
+            let inFlow = 0, outFlow = 0;
+            (portConnections[inKey] || []).forEach(eid => inFlow += edgeFlow[eid]);
+            (portConnections[outKey] || []).forEach(eid => outFlow += edgeFlow[eid]);
+            const totalFlow = Math.max(inFlow, outFlow);
+            maxFlow = Math.max(maxFlow, totalFlow);
+            portTheoretical[inKey] = portTheoretical[outKey] = totalFlow;
+            portRemaining[inKey] = portRemaining[outKey] = 0;
+            p.rate = totalFlow;
+        });
+        ports.outputs.forEach(p => { p.rate = portTheoretical[plannerPortKey(node.id, p.item, 'out')] || 0; });
+        node.machineCount = maxFlow || 1;
     });
 
     const flows = { nodePortsCache, portTheoretical, portRemaining, portConnections, edgeFlow };
@@ -632,7 +662,9 @@ function autoGenerateAllUpstreamNodes(rootNodeId) {
     function dfs(nodeId) {
         const node = plannerState.nodes[nodeId];
         if (!node) return;
-        if (node.kind !== 'recipe') return;
+        // Portals may be the root (e.g. "I need 100 Coal/min here"); everything generated below is a recipe node.
+        const isPortalRoot = nodeId === rootNodeId && node.kind === 'portal';
+        if (node.kind !== 'recipe' && !isPortalRoot) return;
 
         if (nodeId != rootNodeId) {
             const cats = node.recipeModifiers?.catalysts;

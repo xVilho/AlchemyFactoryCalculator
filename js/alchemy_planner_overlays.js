@@ -860,6 +860,8 @@ function openPlannerEdgeModal(edgeId) {
                 <button class="split-btn" style="margin-top:0px; font-size:0.9em; width: auto"
                         onclick="plannerClearEdgeColor('${edgeId}')">${t('Reset', 'ui')}</button>
                 <div class="push-right"></div>
+                <button class="split-btn" style="margin-top:0px; font-size:0.9em; width:auto;" title="${t('Tip: Alt+click a line to place the dot exactly where you click', 'ui')}"
+                        onclick="closeModal('planner-edge-modal'); plannerInsertWaypointOnEdge('${edgeId}')">📍 ${t('Add Reroute Dot', 'ui')}</button>
                 <button class="reset-btn" style="margin-top:0px; font-size:1em; width: 30%" onclick="deletePlannerEdge('${edgeId}')">${t('Delete Connection', 'ui')}</button>
             </div>            
         </div>
@@ -1013,7 +1015,10 @@ function openPlannerRecipePickerMenu(ctx) {
 
     panel.innerHTML = `
         <div class="planner-picker-header">${headerText}</div>
-        <button class="split-btn" style="width:100%; margin-bottom:5px;" onclick="choosePlannerWaypointFromPicker()">+ 📍 Waypoint / Router</button>
+        <div style="display:flex; gap:5px; margin-bottom:5px;">
+            <button class="split-btn" style="flex:1;" onclick="choosePlannerWaypointFromPicker()">+ 📍 Waypoint</button>
+            <button class="split-btn" style="flex:1;" onclick="choosePlannerPortalFromPicker()" title="${t(consuming ? 'Send this output to an external portal (sink)' : 'Supply this input from an external portal (source)', 'ui')}">+ 🌀 Portal</button>
+        </div>
         <input type="text" class="planner-picker-search" placeholder="${t('Search...', 'ui')}"
                oninput="filterPlannerRecipePicker(this.value)">
         <div class="planner-picker-list" id="planner-picker-list"></div>
@@ -1340,7 +1345,7 @@ function togglePlannerSummarySection(key) {
 /** 依 flows 彙總: 金錢/燃料/肥料消耗、機器數、輸出剩餘、輸入短缺 */
 function computePlannerSummaryStats(flows) {
     const machineCounts = {};
-    let heatTotal = 0, fertTotal = 0, goldTotal = 0;
+    let heatTotal = 0, fertTotal = 0, goldTotal = 0, steamTotal = 0;
 
     Object.values(plannerState.nodes).forEach(node => {
         const ports = flows.nodePortsCache[node.id];
@@ -1352,6 +1357,9 @@ function computePlannerSummaryStats(flows) {
         heatTotal += ports.heatItemsPerMin || 0;
         fertTotal += ports.fertItemsPerMin || 0;
         goldTotal += ports.goldCostPerMin || 0;
+        if (node.kind !== 'waypoint' && node.kind !== 'portal') {
+            steamTotal += (ports.inputs.find(p => p.item === 'Steam') || {}).rate || 0;
+        }
     });
 
     const outputSurplus = {};
@@ -1371,7 +1379,7 @@ function computePlannerSummaryStats(flows) {
         if (def && def.buyPrice) goldTotal += def.buyPrice * qty;
     });
 
-    return { machineCounts, heatTotal, fertTotal, outputSurplus, inputShortage, goldTotal };
+    return { machineCounts, heatTotal, fertTotal, steamTotal, outputSurplus, inputShortage, goldTotal };
 }
 
 function renderPlannerSummary(flows) {
@@ -1409,6 +1417,11 @@ function renderPlannerSummary(flows) {
     if (stats.heatTotal > 0.0001) {
         const fuelDef = DB.items[DB.settings.defaultFuel] || {};
         costRows += `<div class="planner-summary-row"><img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"><span>${DB.settings.defaultFuel}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(stats.heatTotal)}/m</span></div>`;
+    }
+    if (stats.steamTotal > 0.0001) {
+        // Steam Boiler (High): 300 Steam / 2s base -> 9000 Steam/min per boiler at speed x1
+        const boilers = stats.steamTotal / (9000 * getSpeedMult(DB.settings.lvlSpeed || 0));
+        costRows += `<div class="planner-summary-row" title="${t('Total Steam consumed by heated machines', 'ui')}"><img src="img/item9002.png" class="item-icon-small"><span>${t('Steam')}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(stats.steamTotal)}/m <span style="color:var(--warn); font-weight:normal;">(≈${boilers.toFixed(2)} ${t('Steam Boiler', 'machines')})</span></span></div>`;
     }
     if (stats.fertTotal > 0.0001) {
         const fertDef = DB.items[DB.settings.defaultFert] || {};
@@ -1459,21 +1472,32 @@ function choosePlannerWaypointFromPicker() {
     closePlannerRecipePickerMenu();
 }
 
-function createPlannerWaypointFromPicker(ctx) {
+function choosePlannerPortalFromPicker() {
+    if (!_plannerPickerContext) return;
+    const ctx = _plannerPickerContext;
+    // Size the portal to exactly the flow available at the port we dragged from.
+    const rate = plannerGetAvailableRateAtPort(ctx.sourceNodeId, ctx.item, ctx.originDir);
+    createPlannerWaypointFromPicker(ctx, 'portal', rate > 0.001 ? rate : 1);
+    closePlannerRecipePickerMenu();
+}
+
+function createPlannerWaypointFromPicker(ctx, kind = 'waypoint', machineCount = 1) {
     const itemName = ctx.item;
     plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
     const newNodeId = 'pnode_' + plannerState._nodeSeq;
-    
-    // offset position slightly so it doesn't overlap exactly if dropped on itself
+
+    const isPortal = kind === 'portal';
     plannerState.nodes[newNodeId] = {
-        id: newNodeId, kind: 'waypoint', portalItem: itemName, machineCount: 1,
-        x: Math.round(ctx.graphX), y: Math.round(ctx.graphY)
+        id: newNodeId, kind, portalItem: itemName, machineCount,
+        // portals are full-size cards: offset so the card (not its corner) lands at the cursor
+        x: Math.round(isPortal ? (ctx.originDir === 'out' ? ctx.graphX : ctx.graphX - 200) : ctx.graphX),
+        y: Math.round(isPortal ? ctx.graphY - 20 : ctx.graphY)
     };
-    
+
     plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
     const newEdgeId = 'pedge_' + plannerState._edgeSeq;
-    
-    const edge = { id: newEdgeId, item: itemName, createdAt: Date.now() };
+
+    const edge = { id: newEdgeId, item: itemName, createdAt: plannerState._edgeSeq };
     if (ctx.originDir === 'out') {
         edge.fromNode = ctx.sourceNodeId;
         edge.toNode = newNodeId;
@@ -1483,7 +1507,7 @@ function createPlannerWaypointFromPicker(ctx) {
     }
     plannerState.edges[newEdgeId] = edge;
 
-    recomputeAndRefreshPlanner();
+    renderPlanner(); // full render: recomputeAndRefreshPlanner() only patches existing node DOM, so the new node would not appear
     savePlannerState();
 }
 

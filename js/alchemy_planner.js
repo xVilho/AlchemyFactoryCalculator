@@ -115,6 +115,7 @@ function initPlannerPage() {
     loadPlannerLibrary();
     loadPlannerSettings();
     renderPlannerToolbarSelect();
+    renderPlannerHeatSelect();
     _plannerViewportCache[plannerLibrary.activePlanId] = { ..._plannerSettings.viewport };
 
     renderPlanner();
@@ -704,6 +705,34 @@ function plannerFitToView(nodeIds = []) {
     savePlannerSettings();
 }
 
+/* ---------------- HEAT SOURCE (shared with Calculator "Heating Device") ---------------- */
+
+function renderPlannerHeatSelect() {
+    const sel = document.getElementById('planner-heat-select');
+    if (!sel) return;
+    sel.innerHTML = '';
+    Object.entries(DB.machines || {})
+        .filter(([, m]) => m.isGenerator)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .forEach(([name]) => {
+            const icon = name === 'Steam Heating Pad' ? '♨' : '🔥';
+            sel.appendChild(new Option(`${icon} ${t(name, 'machines')}`, name));
+        });
+    sel.value = DB.settings.selectedHeatingDevice || 'Stone Furnace';
+}
+
+function onPlannerHeatSourceChange(deviceName) {
+    DB.settings.selectedHeatingDevice = deviceName;
+    const mainSel = document.getElementById('heatingDeviceSelect');
+    if (mainSel) {
+        mainSel.value = deviceName;
+        if (typeof onLogisticsChange === 'function') onLogisticsChange(); // persists + recalculates Calculator tab
+    } else if (typeof persist === 'function') {
+        persist();
+    }
+    renderPlanner();
+}
+
 /* ---------------- ADD / REMOVE NODES ---------------- */
 
 function onPlannerAddNodeClick() {
@@ -929,7 +958,7 @@ function createPlannerNodeEl(node, flows) {
                         </button>
             </div>
             <div class="planner-heatfert-row" id="planner-heatfert-${node.id}">
-                ${renderPlannerHeatFertHtml(ports)}
+                ${renderPlannerHeatFertHtml(ports, node)}
             </div>
         </div>
     `;
@@ -983,13 +1012,30 @@ function renderPlannerPortalNode(wrap, node, flows) {
             ${errorMessageHtml}
             ${renderPlannerPortsHtml(node, ports, flows)}
             <div class="planner-machine-count-row">
-                <input type="number" min="0" step="1" value="${machineCountValue}" data-mc-for="${node.id}" oninput="updatePlannerMachineCount('${node.id}', this.value)">
+                <button class="planner-gear-btn" title="${t('Auto-generate upstream (one level)', 'ui')}" onclick="event.stopPropagation(); autoGenerateUpstreamNodes('${node.id}')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L6 12h5l-1 8 7-12h-5l1-6z"/>
+                    </svg>
+                </button>
+                <input type="number" min="0" step="1" value="${machineCountValue}" data-mc-for="${node.id}"
+                    title="${t('Items per minute', 'ui')}"
+                    oninput="updatePlannerMachineCount('${node.id}', this.value)">
+                <span class="planner-portal-rate-unit">/m</span>
+                <button class="planner-gear-btn" title="${t('Balance existing upstream to this rate, then generate whatever is still missing', 'ui')}" onclick="event.stopPropagation(); plannerPortalBuildUpstream('${node.id}')">🌳</button>
             </div>
         </div>
     `;
 
     attachPlannerNodeDrag(wrap, node); 
     return wrap;
+}
+
+/** Portal 🌳: rescale the upstream chain that already exists to the portal's rate
+ *  (same as Auto-Balance Upstream), then recursively generate nodes only for remaining shortages. */
+function plannerPortalBuildUpstream(nodeId) {
+    if (!plannerState.nodes[nodeId]) return;
+    if (getPlannerUpstreamNodeIds(nodeId).size > 1) _calculateNodeDemand(nodeId);
+    autoGenerateAllUpstreamNodes(nodeId); // renders + saves
 }
 
 function plannerToggleNodeDirection(nodeId) {
@@ -1074,8 +1120,8 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
     return `<div class="planner-port planner-port-out ${rateClass}" title="${port.item}">${name}${icon}${rate}${dot}${badgeHtml}</div>`;
 }
 
-function renderPlannerHeatFertHtml(ports) {
-    let html = '';
+function renderPlannerHeatFertHtml(ports, node) {
+    let html = renderPlannerBeltChipHtml(node);
     if (ports.heatItemsPerMin > 0.001) {
         const fuelDef = DB.items[DB.settings.defaultFuel] || {};
         html += `<span class="heat-tag">-${formatVal(ports.heatItemsPerMin)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small" title="${DB.settings.defaultFuel}"></span>`;
@@ -1088,6 +1134,61 @@ function renderPlannerHeatFertHtml(ports) {
         html += `<span class="gold-tag">-${formatVal(ports.goldCostPerMin)}/m <img src="img/copper.png" class="item-icon-small"></span>`;
     }
     return html;
+}
+
+/* ---------------- MACHINES PER BELT ---------------- */
+
+/**
+ * For a recipe node: how many machines one belt can feed/carry on each solid port
+ * (liquids such as Steam are piped, so they are skipped). `limit` is the tightest port.
+ */
+function plannerGetNodeBeltInfo(node) {
+    if (!node || (node.kind && node.kind !== 'recipe') || !node.recipeId) return null;
+    const rates = plannerGetRecipeRates(node.recipeId, node.recipeModifiers);
+    if (!rates || rates.errorCode || !rates.recipe) return null;
+    const beltSpeed = getBeltSpeed(DB.settings.lvlBelt || 0);
+    const ports = [];
+    const add = (list, dir) => list.forEach(p => {
+        const def = DB.items[p.item];
+        if (!def || def.liquid || !(p.rate > 0)) return;
+        let speed = beltSpeed; // same effective belt rules as plannerGetRecipeRates
+        if (def.category === 'Currency') speed *= 50;
+        else if (dir === 'out' && rates.recipe.sharedOutputs) speed /= rates.recipe.sharedOutputs;
+        ports.push({ item: p.item, dir, perMachine: p.rate, machinesPerBelt: speed / p.rate });
+    });
+    add(rates.inputsPerMachine, 'in');
+    add(rates.outputsPerMachine, 'out');
+    if (ports.length === 0) return null;
+    const limit = ports.reduce((a, b) => (b.machinesPerBelt < a.machinesPerBelt ? b : a));
+    // Whole machines that fit on one belt without overflowing it (fractional if a single machine exceeds a belt)
+    const wholePerBelt = limit.machinesPerBelt >= 1 ? Math.floor(limit.machinesPerBelt + 1e-6) : limit.machinesPerBelt;
+    return { beltSpeed, ports, limit, wholePerBelt };
+}
+
+function renderPlannerBeltChipHtml(node) {
+    const info = plannerGetNodeBeltInfo(node);
+    if (!info) return '';
+    const beltsUsed = node.machineCount / info.limit.machinesPerBelt;
+    const lines = [
+        `${t('Belt', 'ui')}: ${formatVal(info.beltSpeed)}/m`,
+        ...info.ports.map(p => `${p.item} (${t(p.dir === 'in' ? 'in' : 'out', 'ui')}): 1 ${t('belt', 'ui')} = ${formatVal(p.machinesPerBelt)} ${t('machines', 'ui')}`),
+        `${t('Now', 'ui')}: ${beltsUsed.toFixed(2)} ${t('belts of', 'ui')} ${info.limit.item}`,
+        t('Click: set machine count to fill the next whole belt', 'ui')
+    ];
+    return `<span class="belt-tag" title="${_plannerEscapeHtml(lines.join('\n'))}"
+        onpointerdown="event.stopPropagation()" onclick="event.stopPropagation(); plannerFillNodeBelts('${node.id}')">🛤 ${formatVal(info.wholePerBelt)}/${t('belt', 'ui')} <span class="belt-tag-used">(${beltsUsed.toFixed(1)})</span></span>`;
+}
+
+/** Round machine count up to fill whole belts on the tightest port; if already full, add one more belt. */
+function plannerFillNodeBelts(nodeId) {
+    const node = plannerState.nodes[nodeId];
+    const info = plannerGetNodeBeltInfo(node);
+    if (!info) return;
+    const per = info.wholePerBelt;
+    let belts = Math.max(1, Math.ceil(node.machineCount / per - 1e-6));
+    if (Math.abs(node.machineCount - belts * per) < 1e-6) belts += 1;
+    updatePlannerMachineCount(nodeId, belts * per);
+    flashPlannerElements(`[data-mc-for="${nodeId}"]`, 'mc-flash');
 }
 
 /* ==========================================================================
@@ -1233,7 +1334,7 @@ function patchPlannerNodeDisplay(node, flows) {
         const portsRowEl = body.querySelector('.planner-ports-row');
         if (portsRowEl) portsRowEl.outerHTML = renderPlannerPortsHtml(node, ports, flows);
         const heatFertEl = document.getElementById('planner-heatfert-' + node.id);
-        if (heatFertEl) heatFertEl.innerHTML = renderPlannerHeatFertHtml(ports);
+        if (heatFertEl) heatFertEl.innerHTML = renderPlannerHeatFertHtml(ports, node);
     }
     document.querySelectorAll(`[data-mc-for="${node.id}"]`).forEach(el => {
         if (document.activeElement !== el) el.value = Number(node.machineCount.toFixed(3));
@@ -1245,7 +1346,7 @@ function patchPlannerNodeDisplay(node, flows) {
         const modalPortsRow = modalBody.querySelector('.planner-ports-row');
         if (modalPortsRow) modalPortsRow.outerHTML = renderPlannerPortsHtml(node, ports, flows);
         const modalHeatFert = modalBody.querySelector('.planner-heatfert-row');
-        if (modalHeatFert) modalHeatFert.innerHTML = renderPlannerHeatFertHtml(ports);
+        if (modalHeatFert) modalHeatFert.innerHTML = renderPlannerHeatFertHtml(ports, node);
     }
 }
 
@@ -1543,7 +1644,7 @@ function renderPlannerEdges(flows) {
 
         html += `
             <g class="planner-edge-group" data-edge-id="${edge.id}" ${hoverAttrs}${colorStyle}>
-                <path class="planner-edge-hit" d="${d}" onclick="openPlannerEdgeModal('${edge.id}')"></path>
+                <path class="planner-edge-hit" d="${d}" onpointerdown="onPlannerEdgePointerDown(event, '${edge.id}')" onclick="onPlannerEdgeClick(event, '${edge.id}')"></path>
                 ${linePathHtml}
                 <foreignObject x="${mid.x - 60}" y="${mid.y - 15}" width="120" height="32" style="overflow:visible;">
                     <div xmlns="http://www.w3.org/1999/xhtml" class="planner-edge-label" onclick="openPlannerEdgeModal('${edge.id}')"${labelStyle}>
@@ -1556,6 +1657,91 @@ function renderPlannerEdges(flows) {
     });
 
     svg.innerHTML = html;
+}
+
+let _plannerEdgeDragEndedAt = 0;
+
+/** Press + drag on a line: pull a reroute dot out of it at that spot and keep dragging the dot. */
+function onPlannerEdgePointerDown(e, edgeId) {
+    if (e.button !== 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    let wpId = null;
+
+    const onMove = (ev) => {
+        const g = plannerScreenToGraph(ev.clientX, ev.clientY);
+        if (!wpId) {
+            if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return; // still a click
+            wpId = plannerInsertWaypointOnEdge(edgeId, g.x, g.y, false);
+            if (!wpId) return cleanup();
+        }
+        const n = plannerState.nodes[wpId];
+        const el = document.getElementById('planner-node-' + wpId);
+        if (!n || !el) return;
+        n.x = Math.round(plannerSnapVal(g.x));
+        n.y = Math.round(plannerSnapVal(g.y));
+        el.style.left = n.x + 'px';
+        el.style.top = n.y + 'px';
+        if (_plannerLastFlows) renderPlannerEdges(_plannerLastFlows);
+    };
+    const cleanup = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+    };
+    const onUp = () => {
+        cleanup();
+        if (wpId) {
+            _plannerEdgeDragEndedAt = Date.now(); // the drag must not also open the edge settings
+            savePlannerState(); // one undo step for insert + move
+        }
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+}
+
+/** Click on a line opens its settings; Alt+click drops a reroute dot at the clicked spot. */
+function onPlannerEdgeClick(e, edgeId) {
+    if (Date.now() - _plannerEdgeDragEndedAt < 300) return;
+    if (e.altKey) {
+        e.stopPropagation();
+        const g = plannerScreenToGraph(e.clientX, e.clientY);
+        plannerInsertWaypointOnEdge(edgeId, g.x, g.y);
+        return;
+    }
+    openPlannerEdgeModal(edgeId);
+}
+
+/**
+ * Split edge A->B into A->dot->B with a new waypoint at (graphX, graphY).
+ * Both halves keep the original createdAt (flow priority) and color. Without a
+ * position, the dot goes halfway between the two ports.
+ */
+function plannerInsertWaypointOnEdge(edgeId, graphX, graphY, save = true) {
+    const edge = plannerState.edges[edgeId];
+    if (!edge) return null;
+    if (graphX === undefined || graphY === undefined) {
+        const p1 = getPlannerPortGraphPos(edge.fromNode, edge.item, 'out');
+        const p2 = getPlannerPortGraphPos(edge.toNode, edge.item, 'in');
+        if (!p1 || !p2) return null;
+        graphX = (p1.x + p2.x) / 2; graphY = (p1.y + p2.y) / 2;
+    }
+
+    plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
+    const wpId = 'pnode_' + plannerState._nodeSeq;
+    plannerState.nodes[wpId] = { id: wpId, kind: 'waypoint', portalItem: edge.item, machineCount: 1, x: Math.round(graphX), y: Math.round(graphY) };
+
+    const extra = edge.color ? { color: edge.color } : {};
+    [[edge.fromNode, wpId], [wpId, edge.toNode]].forEach(([fromNode, toNode]) => {
+        plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
+        const id = 'pedge_' + plannerState._edgeSeq;
+        plannerState.edges[id] = { id, item: edge.item, fromNode, toNode, createdAt: edge.createdAt, ...extra };
+    });
+    delete plannerState.edges[edgeId];
+
+    hidePlannerEdgeTooltip();
+    renderPlanner();
+    if (save) savePlannerState();
+    return wpId;
 }
 
 /* ---- 拉線互動 ---- */
@@ -1590,7 +1776,10 @@ function startPlannerConnectionDrag(dotEl, e) {
         const hoverRow = hoverEl ? hoverEl.closest('.planner-port') : null;
         if (hoverRow) {
             const hoverDot = hoverRow.querySelector('.planner-port-dot');
-            if (hoverDot && hoverDot !== dotEl && hoverDot.dataset.item === item && hoverDot.dataset.dir !== dir) {
+            const hoverIsWp = !!hoverRow.closest('.planner-waypoint-node');
+            const srcIsWp = plannerState.nodes[nodeId]?.kind === 'waypoint';
+            const itemOk = hoverDot && (hoverDot.dataset.item === item || hoverDot.dataset.item === 'Any' || item === 'Any');
+            if (hoverDot && hoverDot !== dotEl && itemOk && (hoverDot.dataset.dir !== dir || hoverIsWp || srcIsWp)) {
                 const hoverNodeId = hoverRow.closest('.planner-node').id.replace('planner-node-', '');
                 const snapped = getPlannerPortGraphPos(hoverNodeId, hoverDot.dataset.item, hoverDot.dataset.dir);
                 if (snapped) endPos = snapped;
@@ -1615,7 +1804,12 @@ function startPlannerConnectionDrag(dotEl, e) {
 
         const dropEl = document.elementFromPoint(ev.clientX, ev.clientY);
         const targetRow = dropEl ? dropEl.closest('.planner-port') : null;
-        const targetDot = targetRow ? targetRow.querySelector('.planner-port-dot') : null;
+        let targetDot = targetRow ? targetRow.querySelector('.planner-port-dot') : null;
+        // Dropping anywhere on a waypoint (including its ring) connects to it
+        if (!targetDot && dropEl) {
+            const wpEl = dropEl.closest('.planner-waypoint-node');
+            if (wpEl) targetDot = wpEl.querySelector('.planner-port-dot');
+        }
 
         if (targetDot && targetDot !== dotEl) {
             tryCreatePlannerEdgeFromDots(nodeId, item, dir, targetDot);
@@ -1644,11 +1838,13 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
     const targetItem = targetDotEl.dataset.item;
     let targetDir = targetDotEl.dataset.dir;
     
-    // If we dropped on a waypoint, dynamically choose the opposite port so it always connects!
-    const targetNodeKind = targetNodeEl.dataset.kind || (plannerState.nodes[targetNodeId] ? plannerState.nodes[targetNodeId].kind : '');
-    if (targetNodeKind === 'waypoint' && targetDir === sourceDir) {
-        targetDir = sourceDir === 'out' ? 'in' : 'out';
-        // We don't even need to change targetDotEl because the logic below only cares about targetDir and targetItem!
+    if (targetNodeId === sourceNodeId) return;
+
+    // Waypoints expose both directions at the same spot: if either end is a waypoint,
+    // flip that end's direction so the connection always succeeds.
+    if (targetDir === sourceDir) {
+        if (plannerState.nodes[targetNodeId]?.kind === 'waypoint') targetDir = sourceDir === 'out' ? 'in' : 'out';
+        else if (plannerState.nodes[sourceNodeId]?.kind === 'waypoint') sourceDir = targetDir === 'out' ? 'in' : 'out';
     }
 
     if (targetItem !== item && targetItem !== 'Any' && item !== 'Any') { console.log(t('Ports must be the same item to connect.', 'ui')); return; }
@@ -1760,45 +1956,33 @@ function renderPlannerEmptyHint() {
 }
 
 function renderPlannerWaypointNode(wrap, node, flows) {
-    // Clear default node styles
-    wrap.style.backgroundColor = 'var(--bg-light)';
-    wrap.style.borderColor = 'var(--accent)';
-    wrap.style.width = '16px';
-    wrap.style.height = '16px';
-    wrap.style.borderRadius = '50%';
-    wrap.style.border = '2px solid var(--border)';
-    wrap.style.boxShadow = '0 0 6px rgba(0,0,0,0.5)';
-    wrap.style.cursor = 'pointer';
-    wrap.style.zIndex = '10';
-    wrap.style.padding = '0';
-    wrap.style.display = 'block';
-    wrap.style.marginLeft = '-8px';
-    wrap.style.marginTop = '-8px';
+    wrap.classList.add('planner-waypoint-node');
 
     const item = node.portalItem || 'Any';
     const outKey = plannerPortKey(node.id, item, 'out');
     const inKey = plannerPortKey(node.id, item, 'in');
-    
-    // Check if it's fully connected (both in and out) to color it green
-    const connectedIn = flows && flows.portConnections[inKey] && flows.portConnections[inKey].length > 0;
-    const connectedOut = flows && flows.portConnections[outKey] && flows.portConnections[outKey].length > 0;
-    if (connectedIn || connectedOut) {
-        wrap.style.borderColor = '#4CAF50';
-        wrap.style.backgroundColor = '#1b3320';
-    }
+    const connectedIn = !!(flows && (flows.portConnections[inKey] || []).length);
+    const connectedOut = !!(flows && (flows.portConnections[outKey] || []).length);
+    if (connectedIn && connectedOut) wrap.classList.add('wp-connected');
+    else if (connectedIn || connectedOut) wrap.classList.add('wp-half');
 
-    wrap.ondblclick = (e) => {
-        e.stopPropagation();
-        removePlannerNode(node.id);
-    };
+    const throughput = flows ? (flows.portTheoretical[outKey] || 0) : 0;
+    const tip = `${item === 'Any' ? t('Waypoint', 'ui') : item}${throughput > 0.001 ? ' · ' + formatVal(throughput) + '/m' : ''}\n`
+        + t('Drag ring: move · Drag center: connect · Double-click: delete', 'ui');
 
-    // Invisible ports covering the entire dot so that connections snap to the center
+    wrap.ondblclick = (e) => { e.stopPropagation(); removePlannerNode(node.id); };
+
+    // Outer ring = drag handle (planner-node-header so the standard node drag applies).
+    // Center = both ports stacked at the same spot, so edges meet at the dot's center.
+    // The 'out' port is on top: dragging from a waypoint usually continues the route downstream;
+    // tryCreatePlannerEdgeFromDots flips the direction automatically when needed.
     wrap.innerHTML = `
-        <div class="planner-port planner-port-dot planner-port-in" data-node="${node.id}" data-item="${item}" data-dir="in" style="position:absolute; width:100%; height:100%; opacity:0;"></div>
-        <div class="planner-port planner-port-dot planner-port-out" data-node="${node.id}" data-item="${item}" data-dir="out" style="position:absolute; width:100%; height:100%; opacity:0;"></div>
+        <div class="planner-node-header planner-waypoint-handle" title="${_plannerEscapeHtml(tip)}"></div>
+        <div class="planner-port planner-waypoint-port"><span class="planner-port-dot" data-item="${_plannerEscapeHtml(item)}" data-dir="in"></span></div>
+        <div class="planner-port planner-waypoint-port" title="${_plannerEscapeHtml(tip)}"><span class="planner-port-dot" data-item="${_plannerEscapeHtml(item)}" data-dir="out"></span></div>
     `;
 
-    // No drag attached -> immovable
+    attachPlannerNodeDrag(wrap, node);
     return wrap;
 }
 

@@ -5,15 +5,15 @@
 const CAULDRON_STORAGE_KEY = "alchemy_cauldron_v1";
 
 let cauldronState = {
-    activeType: 0, // 0:煉金鍋 1:高級煉金鍋
+    activeType: 0, // 0: Cauldron, 1: Advanced Cauldron
     activeProfile: 0,
     favorites: [],
-    heatPerCopper: 20,   // 新增：熱值/銅幣 換算率
-    nutrPerCopper: 12,   // 新增：肥力/銅幣 換算率
+    heatPerCopper: 20,   // Heat-to-copper conversion rate
+    nutrPerCopper: 12,   // Nutrient-to-copper conversion rate
     showEstCost: true,
     orderByEstCost: true,
-    stepMode: 0,   // 0: 单次步骤, 1: 多次步骤
-    intermediateLimit: 3,   // 多次步驟的中間產物數量上限
+    stepMode: 0,   // 0: single step, 1: multi-step
+    intermediateLimit: 3,   // Max number of intermediate products in multi-step mode
     profiles: [
         { candidates: [] }, // Profile 1
         { candidates: [] }, // Profile 2
@@ -21,16 +21,16 @@ let cauldronState = {
     ]
 };
 
-// 多次步骤計算結果快取
+// Multi-step result cache
 let multiStepState = {
     dirty: true,
     steps: [null, null, null, null]  // Map<item, {cost, cauldronCostSum, recipeInputs}>
 };
 
-// 目前作用中的「上游過濾」狀態：{ item, stepIdx } 或 null (未過濾)
+// Active upstream filter: { item, stepIdx } or null (no filter)
 let _multiStepUpstreamFilter = null;
 
-let cauldronCandidates = new Set(); // 存储被勾选的物品名
+let cauldronCandidates = new Set(); // Names of the checked items
 let cauldronCatFilter = "[All]";
 let cauldronFilterItems = [null, null, null];
 let cauldronTargetOutput = null;
@@ -41,7 +41,7 @@ function isVaildCandidate(itemName) {
     return item && item.cauldronCost !== undefined && !(item.liquid) && !(item.virtual);
 }
 
-// 初始化：在 alchemy_ui.js 的 init() 之后调用
+// Init: called after init() in alchemy_ui.js
 function initCauldron() {
     loadCauldronSettings();    
     buildItemBaseCost();
@@ -70,11 +70,11 @@ function loadCauldronSettings() {
             console.error("Cauldron settings corrupt, using defaults.");
         }
     } else {
-        // 如果是第一次运行，默認Profile 1為全選
+        // On first run, Profile 1 selects everything
         cauldronState.profiles[0].candidates = Object.keys(DB.items).filter(isVaildCandidate);        
-        // 默认Profile 2為植物+產物基底
+        // Profile 2 defaults to plants + their products
         cauldronState.profiles[1].candidates = Array.from(getPresetCandidates('Herbs'));
-        // 默认Profile 3為金幣+原料基底
+        // Profile 3 defaults to coins + raw materials
         cauldronState.profiles[2].candidates = Array.from(getPresetCandidates('Gold'));
         cauldronState.showEstCost = true;
         cauldronState.orderByEstCost = true;
@@ -86,7 +86,7 @@ function loadCauldronSettings() {
 }
 
 function saveCauldronSettings() {
-    // 将 Set 同步回当前 Profile
+    // Sync the Set back to the current profile
     cauldronState.profiles[cauldronState.activeProfile].candidates = Array.from(cauldronCandidates);    
     localStorage.setItem(CAULDRON_STORAGE_KEY, JSON.stringify(cauldronState));
 }
@@ -144,17 +144,17 @@ function getPresetCandidates(poolType) {
    ========================================================================== */
 
 /**
- * 依 customCost / buyPrice / nutrientCost 等基礎屬性，
- * 逐輪擴散推導出所有可由單一輸出配方生產的物品的估算銅幣價值。
- * 只有輸入全數已知價值、且輸出僅有一種物品的配方才會被納入推導。
- * 建置完成後直接覆蓋 _cauldronCostCache。
+ * Starting from base properties (customCost / buyPrice / nutrientCost ...),
+ * repeatedly derive an estimated copper value for every item made by a single-output recipe.
+ * Only recipes whose inputs all have known values and that have exactly one output are used.
+ * Overwrites _cauldronCostCache when done.
  */
 function buildItemBaseCost() {
     const cache = new Map();
     const heatPerCopper = cauldronState.heatPerCopper || 20;
     const nutrPerCopper = cauldronState.nutrPerCopper || 12;
 
-    // ---- Round 0: 基礎物品 (customCost / buyPrice / Currency / heat / nutrientValue) ----
+    // ---- Round 0: base items (customCost / buyPrice / Currency / heat / nutrientValue) ----
     Object.entries(DB.items).forEach(([name, item]) => {
         let cost = null;
         const custom = DB.settings.customCosts?.[name];
@@ -178,44 +178,44 @@ function buildItemBaseCost() {
         if (DB.items[itemName] && !cache.has(itemName)) cache.set(itemName, value);
     }
 
-    // 特殊處理金锭
+    // Special cases for precious metals
     _setBaseCost('Crude Silver Powder', 1500);
     _setBaseCost('Silver Ingot', 6000);
     _setBaseCost('Crude Gold Dust', 12500);
     _setBaseCost('Gold Ingot', 100000);
 
-    // ---- 反覆擴散：找出「輸入皆已知、輸出唯一」的配方 ----
+    // ---- Repeat: find recipes whose inputs are all known and that have a single output ----
     for (;;) {
-        const newlyResolved = new Map(); // 本輪新算出的值，跑完整輪才 merge (先到先得)
+        const newlyResolved = new Map(); // Values found this round; merged after the full round (first one wins)
 
         for (const recipe of DB.recipes) {
-            // 略過任何煉金鍋的配方, 包含收錄的以及官方的配方
+            // Skip all cauldron recipes, both collected and official ones
             //if (recipe.id.startsWith('AUTO_GENERATED_CAULDRON')) continue;
             if (recipe.machine === 'Cauldron' || recipe.machine === 'Advanced Cauldron') continue;
 
             const outKeys = Object.keys(recipe.outputs || {});
-            if (outKeys.length !== 1) continue; // 排除多輸出配方
+            if (outKeys.length !== 1) continue; // Skip multi-output recipes
             const outName = outKeys[0];
             if (cache.has(outName) || newlyResolved.has(outName)) continue;
 
             const inKeys = Object.keys(recipe.inputs || {});
-            if (inKeys.length === 0) continue; // 無輸入配方 (Bank Portal 等) 不參與推導
+            if (inKeys.length === 0) continue; // Recipes without inputs (Bank Portal etc.) are not used
             if (!inKeys.every(k => cache.has(k))) continue;
 
-            // 對於maxStack為負的物品, 需要將cache先回調成一個物品的值
+            // Items with negative maxStack: convert the cached value back to one whole item first
             let inputCostSum = 0;
             inKeys.forEach(k => { 
                 const maxStack = DB.items[k]?.maxStack;
                 inputCostSum += cache.get(k) * ((maxStack < 0) ? -maxStack : 1) * recipe.inputs[k]; 
             });
 
-            // 機台熱耗 -> 轉換成銅幣成本 (概算：以配方本身 baseTime 計算單批熱耗)
+            // Machine heat use -> copper cost (approximation: heat per batch from the recipe's baseTime)
             let heatCostPerBatch = 0;
             const machine = DB.machines[recipe.machine];
             if (machine && machine.heatCost) {
                 heatCostPerBatch = machine.heatCost > 0
                     ? machine.heatCost * (recipe.baseTime || 1)
-                    : (recipe.heatCost || 0); // heatCost < 0 (如 Cauldron) 改用配方自帶的 heatCost
+                    : (recipe.heatCost || 0); // heatCost < 0 (e.g. Cauldron) uses the recipe's own heatCost
             }
             const heatCostConverted = heatCostPerBatch / heatPerCopper;
 
@@ -223,11 +223,11 @@ function buildItemBaseCost() {
             const outQty = recipe.outputs[outName];
             const maxStack = DB.items[outName]?.maxStack;
             const unitCost = (inputCostSum + heatCostConverted) / outQty;
-            const finalValue = maxStack < 0 ? (unitCost / -maxStack) : unitCost; // 需要再轉變成單一份的成本
+            const finalValue = maxStack < 0 ? (unitCost / -maxStack) : unitCost; // Convert back to the cost of a single portion
             newlyResolved.set(outName, finalValue); 
         }
 
-        if (newlyResolved.size === 0) break; // 沒有新物品可推導，結束
+        if (newlyResolved.size === 0) break; // Nothing new to derive, done
         newlyResolved.forEach((cost, name) => cache.set(name, cost));
     }
 
@@ -235,18 +235,18 @@ function buildItemBaseCost() {
     return cache;
 }
 
-/** 查詢單一物品的估算價值，查不到回傳 null */
+/** Estimated value of one item, or null if unknown */
 function getItemBaseCost(itemName) {
     return _cauldronCostCache.has(itemName) ? _cauldronCostCache.get(itemName) : null;
 }
 
-// inputs: string[]，例如 r.inputs (cauldron結果) 陣列
+// inputs: string[], e.g. the r.inputs array of a cauldron result
 function getRecipeEstCost(inputs) {
     let totalCost = 0;
     let string = "";
     for (const name of inputs) {
         const cost = getItemBaseCost(name);
-        if (cost === null) { totalCost = null; string = null; break; }; // 任一無法計算 → 整筆視為無法計算
+        if (cost === null) { totalCost = null; string = null; break; }; // Any unknown -> the whole total is unknown
         totalCost += cost;
         string += `${name}(${Number(cost.toFixed(2))}) `;
     }
@@ -255,7 +255,7 @@ function getRecipeEstCost(inputs) {
 
 function onToggleCauldronCostDisplay() {
     cauldronState.showEstCost = document.getElementById('cauldron-show-est-cost').checked;
-    // 重新渲染目前已展開的配方列表（若有）
+    // Re-render the currently expanded recipe lists (if any)
     document.querySelectorAll('.cauldron-card:not(.collapsed) .node-content[data-out]').forEach(el => {
         const childrenContainer = el.parentElement.querySelector('.node-children');
         renderRecipeRows(el.dataset.out, childrenContainer);
@@ -270,30 +270,30 @@ function onToggleOrderByEstCost() {
     saveCauldronSettings();
 
 
-    // 记录当前展开的卡片 ID（这些卡片在重新渲染后将变为折叠状态）
+    // Remember which cards are expanded (they collapse when re-rendered)
     const expandedCardIds = [];
     document.querySelectorAll('.cauldron-card:not(.collapsed)').forEach(card => {
         if (card.id) expandedCardIds.push(card.id);
     });
 
-    // 重新渲染整个结果区（基于已有的 lastCauldronResults）
+    // Re-render the whole result area (from the existing lastCauldronResults)
     renderCauldronResults(lastCauldronResults);
 
-    // 恢复展开状态：找到对应卡片，移除 collapsed 类，并填充子节点内容
+    // Restore the expanded state: find each card, remove the collapsed class and fill its children
     expandedCardIds.forEach(id => {
         const card = document.getElementById(id);
         if (!card) return;
 
-        // 展开卡片（移除折叠类）
+        // Expand the card (remove the collapsed class)
         card.classList.remove('collapsed');
 
-        // 填充子节点内容（如果尚未填充）
+        // Fill the child content (if not filled yet)
         const content = card.querySelector('.node-content');
         const childrenContainer = card.querySelector('.node-children');
         if (content && childrenContainer) {
             const outName = content.dataset.out;
             if (outName && lastCauldronResults[outName]) {
-                // 直接调用渲染函数，与 toggleCauldronCard 内部逻辑一致
+                // Call the render function directly, same as inside toggleCauldronCard
                 renderRecipeRows(outName, childrenContainer);
             }
         }
@@ -301,7 +301,7 @@ function onToggleOrderByEstCost() {
 }
 
 /**
- * 刷新所有已展开的卡片内的配方列表（重新排序并渲染）
+ * Refresh the recipe lists in all expanded cards (re-sort and re-render)
  */
 function refreshExpandedCauldronCards() {
     document.querySelectorAll('.cauldron-card:not(.collapsed) .node-content[data-out]').forEach(el => {
@@ -336,12 +336,12 @@ function _renderItemBaseCostRates() {
 }
 
 /**
- * 處理熱值/肥力換算率四個輸入框中任一個變動。
+ * Handle a change in any of the four heat/nutrient conversion inputs.
  * which: 'heatPerCopper' | 'copperPerHeat' | 'nutrPerCopper' | 'copperPerFert'
  */
 function onBaseCostRateChange(which, value) {
     const val = parseFloat(value);
-    if (!(val > 0)) return; // 忽略無效值或 0，避免除以 0
+    if (!(val > 0)) return; // Ignore invalid values or 0 to avoid dividing by 0
 
     switch (which) {
         case 'heatPerCopper': cauldronState.heatPerCopper = val; break;
@@ -355,7 +355,7 @@ function onBaseCostRateChange(which, value) {
     buildItemBaseCost();
     _renderItemBaseCostList();
 
-    // 同步刷新目前已展開的配方成本顯示
+    // Refresh the cost shown in the currently expanded recipes
     document.querySelectorAll('.cauldron-card:not(.collapsed) .node-content[data-out]').forEach(el => {
         const childrenContainer = el.parentElement.querySelector('.node-children');
         renderRecipeRows(el.dataset.out, childrenContainer);
@@ -370,7 +370,7 @@ function _populateItemBaseCostCategories() {
     const prevVal = _baseCostCatFilter;
     sel.innerHTML = '';
 
-    // 统计每个类别的物品数量
+    // Count the items in each category
     const catCounts = new Map();
     let totalCount = 0;
     _cauldronCostCache.forEach((cost, name) => {
@@ -381,13 +381,13 @@ function _populateItemBaseCostCategories() {
         }
     });
 
-    // 获取所有非 [All] 类别，并按数量降序排序（数量相同则按名称升序）
+    // All categories except [All], sorted by count descending (ties by name ascending)
     const cats = Array.from(catCounts.keys());
     cats.sort((a, b) => {
         const countA = catCounts.get(a) || 0;
         const countB = catCounts.get(b) || 0;
-        if (countA !== countB) return countB - countA; // 数量多的排前面
-        return a.localeCompare(b);                     // 数量相同按字母顺序
+        if (countA !== countB) return countB - countA; // Larger count first
+        return a.localeCompare(b);                     // Same count: alphabetical
     });
     const sortedCats = ["[All]"].concat(cats);
 
@@ -410,7 +410,7 @@ function _renderItemBaseCostList() {
     if (_baseCostCatFilter !== "[All]") {
         entries = entries.filter(([name]) => DB.items[name]?.category === _baseCostCatFilter);
     }
-    entries.sort((a, b) => a[1] - b[1]); // 依估算價值低到高
+    entries.sort((a, b) => a[1] - b[1]); // By estimated value, low to high
 
     if (entries.length === 0) {
         container.innerHTML = `<div style="color:#666; padding:10px; font-size:0.85em; text-align:center;">${t('No items found.', 'ui')}</div>`;
@@ -540,7 +540,7 @@ function renderCandidatePool() {
     });
 }
 
-// [修改] switchCauldronType：加入 UI 顯示/隱藏切換，並在切換至 Type1 時清除 slot3 狀態
+// switchCauldronType: toggles the related UI and clears slot 3 when switching to Type 1
 function switchCauldronType(index, triggerCalc = true) {
     cauldronState.activeType = index;
     for (let i = 0; i < 2; i++) {
@@ -590,7 +590,7 @@ function switchCauldronStepMode(mode, triggerCalc = true) {
 }
 
 /**
- * 將目前 Profile 的候選清單重置為「草藥/植物」預設組
+ * Reset the current profile's candidate list to a preset (e.g. herbs/plants)
  */
 function applyPreset(poolType) {
     const candidates = getPresetCandidates(poolType);
@@ -635,7 +635,7 @@ function bulkToggleCandidates(check) {
 }
 
 /**
- * 处理物品选择，复用已有的 Item Picker
+ * Handle item selection, reusing the existing Item Picker
  */
 function pickFilterItem(slotIdx, clear = false) {
     if (clear) {
@@ -644,12 +644,12 @@ function pickFilterItem(slotIdx, clear = false) {
         return;
     }
     
-    // 临时重写 selectItem 逻辑
+    // Temporarily override selectItem
     const originalSelectItem = window.selectItem;
     window.selectItem = (name) => {
         cauldronFilterItems[slotIdx - 1] = name;
         updateFilterUI();
-        window.selectItem = originalSelectItem; // 还原
+        window.selectItem = originalSelectItem; // Restore
         runCauldronSimulation();
     };
     
@@ -662,11 +662,11 @@ function updateFilterUI() {
         const ctrlEl = document.getElementById(`slot-ctrl-${i}`);
         const val = cauldronFilterItems[i - 1];
         
-        // 更新上方 Picker 文字
+        // Update the picker text above
         slotEl.innerText = val ? val : t('Set Input') + ` ${i}`;
         slotEl.classList.toggle('active', !!val);
 
-        // 更新下方控制列 HTML
+        // Update the control row HTML below
         if (val) {
             const item = DB.items[val];
             ctrlEl.innerHTML = `
@@ -677,17 +677,17 @@ function updateFilterUI() {
             `;
             ctrlEl.style.visibility = 'visible';
         } else {
-            // 如果沒選中物品，可以選擇隱藏或顯示空的提示
+            // With no item selected, either hide it or show an empty hint
             ctrlEl.innerHTML = `<button class="swap-btn" style="opacity:0.3" onclick="shiftFilterItem(${i}, 1)">+</button>`;
-            // 或者直接 ctrlEl.style.visibility = 'hidden';
+            // or simply ctrlEl.style.visibility = 'hidden';
         }
     }
 }
 
 /**
- * 切換選中物品到上一個或下一個
+ * Switch the selected item to the previous or next one
  * @param {number} slotIdx 1, 2, 3
- * @param {number} delta -1 或 1
+ * @param {number} delta -1 or 1
  */
 function shiftFilterItem(slotIdx, delta, event) {
     const useCandidatesOnly = !!(event && (event.ctrlKey || event.metaKey));
@@ -703,10 +703,10 @@ function shiftFilterItem(slotIdx, delta, event) {
 
     if (currentItem) {
         const currentIdx = list.indexOf(currentItem);
-        // 循環索引處理
+        // Wrap the index around
         nextIdx = (currentIdx + delta + list.length) % list.length;
     } else {
-        // 如果原本是空的，點擊 + 則從第一個開始，點擊 - 則從最後一個開始
+        // If empty, + starts from the first item and - from the last
         nextIdx = delta > 0 ? 0 : list.length - 1;
     }
 
@@ -722,14 +722,14 @@ function pickCauldronTargetOutput(clear = false) {
         runCauldronSimulation();
         return;
     }
-    const hadProp = currentPickerProps.has('cauldronTarget');   // 記住原狀態
+    const hadProp = currentPickerProps.has('cauldronTarget');   // Remember the original state
     window.selectItem = (name) => {
         if (DB.items[name]?.cauldronTarget === undefined) {
             alert(t('Selected item is not a valid cauldron target.', 'ui'));
-            return;   // 不需再手動還原 selectItem,由 closeModal 統一處理
+            return;   // No need to restore selectItem by hand; closeModal handles it
         }
         cauldronTargetOutput = name;
-        closeModal('picker-modal');   // 會觸發 _runPickerCleanup
+        closeModal('picker-modal');   // Triggers _runPickerCleanup
         updateCauldronTargetOutputUI();
         runCauldronSimulation();
     };
@@ -748,7 +748,7 @@ function updateCauldronTargetOutputUI() {
 }
 
 function onMultiStepIntermediateLimitChange(value) {
-    // 強制轉成 1~3 的整數
+    // Force an integer from 1 to 3
     let limit = parseInt(value, 10);
     if (!Number.isFinite(limit)) limit = 3;
     limit = Math.max(1, Math.min(3, limit));
@@ -764,7 +764,7 @@ function onMultiStepIntermediateLimitChange(value) {
    SECTION: ASYNC CAULDRON CALCULATION
    ========================================================================== */
 
-let lastCauldronResults = {}; // 全局存储计算结果数据
+let lastCauldronResults = {}; // Global store of the computed results
 
 async function runCauldronSimulation() {
     if (cauldronState.activeType === 1) {
@@ -780,21 +780,21 @@ async function runCauldronSimulation() {
 }
 
 /**
- * 线性插值函数：根据 cauldronTarget 计算时间与热值
+ * Linear interpolation: time and heat from cauldronTarget
  */
 function getCauldronStats(target) {
     const t = [1, 100, 1000, 10000, 1000000];
     const times = [3, 6, 12, 24, 60];
     const heats = [1, 20, 200, 1500, 10000];
 
-    // 边界处理
+    // Boundaries
     if (target <= t[0]) return { time: times[0], heat: heats[0] };
     if (target >= t[t.length - 1]) return { time: times[times.length - 1], heat: heats[heats.length - 1] };
 
-    // 查找区间
+    // Find the interval
     for (let i = 0; i < t.length - 1; i++) {
         if (target >= t[i] && target <= t[i+1]) {
-            const p = (target - t[i]) / (t[i+1] - t[i]); // 百分比
+            const p = (target - t[i]) / (t[i+1] - t[i]); // Fraction
             return {
                 time: Math.round((times[i] + p * (times[i+1] - times[i]))*10)/10,
                 heat: Math.round((heats[i] + p * (heats[i+1] - heats[i]))*10)/10
@@ -814,7 +814,7 @@ function _getCauldronValidTargets() {
         }));
 }
 
-/** 普通煉金鍋 (3格) 純函式：僅解析輸出物品，不涉及 UI/過濾 */
+/** Cauldron (3 slots), pure function: resolves only the output item, no UI/filtering */
 function resolveCauldronOutput3(n0, n1, n2, validTargets) {
     const c0 = DB.items[n0].cauldronCost, c1 = DB.items[n1].cauldronCost, c2 = DB.items[n2].cauldronCost;
 
@@ -846,7 +846,7 @@ function resolveCauldronOutput3(n0, n1, n2, validTargets) {
     return { output: bestItem, ratio, T };
 }
 
-/** 高級煉金鍋 (2格) 純函式：僅解析輸出物品，不涉及 UI/過濾 */
+/** Advanced Cauldron (2 slots), pure function: resolves only the output item, no UI/filtering */
 function resolveCauldronOutput2(nA, nB, validTargets, maxTargetItem, minTargetItem) {
     const cA = DB.items[nA].cauldronCost;
     const cB = DB.items[nB].cauldronCost;
@@ -893,7 +893,7 @@ async function runCauldronSimulationType0() {
     const validTargets = _getCauldronValidTargets();
 
     const list = [...cauldronCandidates].filter(isVaildCandidate);
-    list.sort((a, b) => (DB.items[b].cauldronCost - DB.items[a].cauldronCost)); // 由大至小
+    list.sort((a, b) => (DB.items[b].cauldronCost - DB.items[a].cauldronCost)); // Largest first
 
     const progText = document.getElementById('cauldron-progress');
 
@@ -1028,9 +1028,9 @@ async function runCauldronSimulationType1() {
 }
 
 /**
- * 多次步驟計算：從候選池 (Step 0) 開始，逐輪用煉金鍋組合尋找更低成本的產物，
- * 最多跑 4 輪 (Step 0~3)。每輪僅在「新成本 < 舊成本」時覆蓋，
- * 成本相同則比較真實 cauldronCost 加總，取較小者。
+ * Multi-step calculation: starting from the candidate pool (Step 0), each round uses cauldron combinations to find cheaper products,
+ * for at most 4 rounds (Step 0-3). Each round only overwrites when the new cost is lower;
+ * on equal cost, the smaller total real cauldronCost wins.
  */
 async function runMultiStepCauldronSimulation() {
     console.time('runMultiStepCauldronSimulation');
@@ -1044,7 +1044,7 @@ async function runMultiStepCauldronSimulation() {
     const heatPerCopper = cauldronState.heatPerCopper || 20;
     const isType1 = cauldronState.activeType === 1;
 
-    // ---- Step 0：來自候選池的基礎成本 ----
+    // ---- Step 0: base costs from the candidate pool ----
     const step0 = new Map();
     cauldronCandidates.forEach(item => {
         if (!isVaildCandidate(item)) return;
@@ -1064,7 +1064,7 @@ async function runMultiStepCauldronSimulation() {
 
     for (let stepIdx = 1; stepIdx <= 4; stepIdx++) {
         const prev = steps[stepIdx - 1];
-        const next = new Map(prev); // 繼承上一輪所有物品
+        const next = new Map(prev); // Inherit every item from the previous round
         const pool = [...prev.keys()];
         const bestThisRound = new Map(); // output -> {cost, cauldronCostSum, recipeInputs}
 
@@ -1079,7 +1079,7 @@ async function runMultiStepCauldronSimulation() {
                 cauldronCostSum += DB.items[inp].cauldronCost;
                 if (rec.cost != getItemBaseCost(inp)) intermediateCount++;
             }
-            if (intermediateCount > cauldronState.intermediateLimit) return; // 檢查中間產物的數量是否超出上限
+            if (intermediateCount > cauldronState.intermediateLimit) return; // Too many intermediate products
 
             const ingredientsCost = cost;
             const stats = getCauldronStats(DB.items[output].cauldronTarget);
@@ -1160,11 +1160,11 @@ async function runMultiStepCauldronSimulation() {
    ========================================================================== */
 
 /**
- * 從 item（於 stepIdx 這一輪的結果）開始，沿 recipeInputs 往回追溯。
- * 回傳：
- *   rowItems: 所有上游祖先的物品名稱集合（用於過濾表格列，不含自己）
- *   cellKeys: "item::stepIdx" 格式的集合，標記整條追溯鏈實際經過的每一格
- *             (含 item 自己在 stepIdx 的那一格)，供 ▲ 按鈕標記 active 用
+ * Trace back along recipeInputs from item (its result in round stepIdx).
+ * Returns:
+ *   rowItems: names of all upstream ancestors (used to filter table rows, excluding the item itself)
+ *   cellKeys: set of "item::stepIdx" keys for every cell the trace passes through
+ *             (including the item's own cell at stepIdx), used to mark the active up-arrow buttons
  */
 function _computeMultiStepUpstreamAncestors(item, stepIdx) {
     const rowItems = new Set();
@@ -1184,7 +1184,7 @@ function _computeMultiStepUpstreamAncestors(item, stepIdx) {
     return { rowItems, cellKeys };
 }
 
-/** 切換某格 (item @ stepIdx) 的上游過濾狀態；同一格再按一次即取消過濾 */
+/** Toggle the upstream filter for a cell (item @ stepIdx); pressing the same cell again clears it */
 function toggleMultiStepUpstreamFilter(item, stepIdx) {
     if (_multiStepUpstreamFilter && _multiStepUpstreamFilter.item === item && _multiStepUpstreamFilter.stepIdx === stepIdx) {
         _multiStepUpstreamFilter = null;
@@ -1194,14 +1194,14 @@ function toggleMultiStepUpstreamFilter(item, stepIdx) {
     renderMultiStepTable();
 }
 
-/** 檢查給定 output+inputs 組合是否已存在於收藏中 */
+/** Whether this output + inputs combination is already a favorite */
 function _isMultiStepFavRecipe(output, inputs) {
     if (!inputs) return false;
     const key = [...inputs].sort().join(',');
     return cauldronState.favorites.some(f => f.output === output && [...f.inputs].sort().join(',') === key);
 }
 
-/** fav-btn 點擊：切換收藏並重繪表格（保留目前過濾狀態） */
+/** fav-btn click: toggle the favorite and redraw the table (keeping the current filter) */
 function toggleMultiStepFav(item, inputsJson) {
     const inputs = JSON.parse(inputsJson);
     toggleFavorite(...inputs, item);
@@ -1227,7 +1227,7 @@ function renderMultiStepTable() {
         return ta - tb;
     });
 
-    // 若有作用中的上游過濾，只保留目標物品自己 + 其所有上游祖先
+    // With an active upstream filter, keep only the target item and all its ancestors
     let _msChainCellKeys = null;
     if (_multiStepUpstreamFilter) {
         const { item: activeItem, stepIdx: activeStepIdx } = _multiStepUpstreamFilter;
@@ -1272,7 +1272,7 @@ function renderMultiStepTable() {
             }
             const costHtml = `<div class="ms-cost-row"${costTitleAttr}>${cost.toLocaleString()}<img src="img/copper.png" class="item-icon-small"></div>`;
 
-            // 更新 prevCost 为当前有效 cost
+            // Update prevCost to the current effective cost
             prevCost = cost;
 
             let recipeHtml;
@@ -1334,9 +1334,9 @@ function renderCauldronResults(data) {
         const stats = getCauldronStats(outputItem.cauldronTarget);
         const card = document.createElement('div');
         card.className = 'node cauldron-card collapsed';
-        card.id = `cauldron-out-${outName.replace(/\s+/g, '-')}`; // 方便定位
+        card.id = `cauldron-out-${outName.replace(/\s+/g, '-')}`; // For lookup
         
-        // 掃描該產物所有配方，找出最低預估成本 (O(N)，N = 該產物配方數)
+        // Scan all recipes of this product for the lowest estimated cost (O(N), N = its recipe count)
         let minEstCost = null;
         let minEstCostRecipe = null;
         let resultString = ""; 
@@ -1352,7 +1352,7 @@ function renderCauldronResults(data) {
                 }
             });
         }
-        // 构建 minCostTag
+        // Build minCostTag
         const minCostTag = (minEstCost !== null && minEstCostRecipe)
             ? `<span class="cost-tag help-tag" title="${t('Minimum')+t('Estimated Cost')}: ${resultString}">
                 ${Math.ceil(minEstCost).toLocaleString()} 
@@ -1380,16 +1380,16 @@ function renderCauldronResults(data) {
     });
 
     if (sortedOutputs.length === 1) {        
-        // 當只有一個產物時, 直接展開
+        // With only one product, expand it right away
         const firstCardContent = container.querySelector('.node-content');
         if (firstCardContent) {
-            // 直接呼叫函數，並模擬傳入 this (content) 和 parent (card)
+            // Call the function directly, passing this (content) and parent (card)
             toggleCauldronCard(firstCardContent, firstCardContent.parentElement);
         }
     }
 }
 
-// 1. 建立一個查找用的快取，避免渲染時反覆遍歷陣列
+// 1. Build a lookup cache so rendering doesn't scan the array repeatedly
 function getFavoriteKey(out, inputs) {
     return `${out}|${[...inputs].sort().join(',')}`;
 }
@@ -1399,7 +1399,7 @@ function toggleCauldronCard(thisCard, cardElement) {
     const isCollapsed = cardElement.classList.contains('collapsed');
     
     if (isCollapsed) {
-        // 每次展開都重新渲染（清除舊內容讓 DOM 輕量化）
+        // Re-render on every expand (clearing old content keeps the DOM light)
         childrenContainer.innerHTML = '<div class="loading-placeholder"></div>';
         const outName = thisCard.dataset.out;
         renderRecipeRows(outName, childrenContainer);
@@ -1414,21 +1414,21 @@ function renderRecipeRows(outName, container) {
         return;
     }
 
-    // 预计算 estCost（仅当 showEstCost 为 true 时才有值）
+    // Precompute estCost (only has a value when showEstCost is true)
     const recipesWithEst = recipes.map(r => {
         let estCost = null;
         let estString = '';
         if (cauldronState.showEstCost) {
             const { totalCost, string } = getRecipeEstCost(r.inputs);
-            estCost = totalCost;    // 可能为 null
+            estCost = totalCost;    // May be null
             estString = string || '';
         }
         return { ...r, estCost, estString };
     });
 
-    // 排序
+    // Sort
     if (cauldronState.orderByEstCost) {
-        // 按 estCost 升序，null 排最后，再按 totalValue 升序
+        // By estCost ascending, null last, then by totalValue ascending
         recipesWithEst.sort((a, b) => {
             if (a.estCost === null && b.estCost === null) {
                 return a.totalValue - b.totalValue;
@@ -1439,11 +1439,11 @@ function renderRecipeRows(outName, container) {
             return a.totalValue - b.totalValue;
         });
     } else {
-        // 仅按 totalValue 升序（原有逻辑）
+        // Only by totalValue ascending (original behavior)
         recipesWithEst.sort((a, b) => a.totalValue - b.totalValue);
     }
 
-    // 預先處理「收藏夾」索引，將複雜度從 O(N*M) 降到 O(N)
+    // Pre-index favorites, from O(N*M) down to O(N)
     const favSet = new Set(
         cauldronState.favorites
             .filter(f => f.output === outName)
@@ -1451,10 +1451,10 @@ function renderRecipeRows(outName, container) {
     );
 
     container.innerHTML = '';
-    const CHUNK_SIZE = 100; // 稍微調高，現代瀏覽器處理簡單 HTML 很快
+    const CHUNK_SIZE = 100; // Simple HTML renders fast in modern browsers
     let currentIndex = 0;
 
-    // 事件委託改進：只需綁定一次（通常建議在頁面初始化時綁定在父容器，而非此處）
+    // Event delegation: only needs binding once (ideally on the parent at page init, not here)
     if (!container.dataset.hasListener) {
         container.addEventListener('click', (e) => {
             const btn = e.target.closest('.btn-fav');
@@ -1484,7 +1484,7 @@ function createRecipeRowHtml(r, outName, favSet) {
     const { inputs, totalValue, estCost, estString } = r;
     const displayValue = r.displayValue !== undefined ? r.displayValue : totalValue;
     
-    // 使用預先計算好的 Set 進行查找，性能極大提升
+    // Look up in the precomputed Set, much faster
     const sortedKey = [...inputs].sort().join(',');
     const isFav = favSet.has(sortedKey);
     
@@ -1500,7 +1500,7 @@ function createRecipeRowHtml(r, outName, favSet) {
         }
     }
 
-    // 預先處理 HTML 片段
+    // Prepare the HTML fragments
     const inputsHtml = inputs.map(n => {
         const item = DB.items[n] || { id: 0, cauldronCost: 0 };
         return `<img src="img/item${item.id}.png" class="item-icon-small">
@@ -1509,7 +1509,7 @@ function createRecipeRowHtml(r, outName, favSet) {
 
     const dataAttrs = inputs.map((n, idx) => `data-i${idx + 1}="${n}"`).join(' ');
 
-    // 使用 estCost 和 estString 生成成本标签
+    // Build the cost tag from estCost and estString
     let costHtml = '';
     if (cauldronState.showEstCost && estCost !== null) {
         costHtml = `<span class="cost-tag" style="margin-left:auto; margin-right:5px" 
@@ -1537,7 +1537,7 @@ function toggleFavoriteStar(event, btn) {
     const { i1, i2, i3, out } = btn.dataset;
     const favs = cauldronState.favorites;
 
-    // Type1 只有 2 個原料，Type0 有 3 個
+    // Type 1 has only 2 ingredients, Type 0 has 3
     const recipeInputs = cauldronState.activeType === 1
         ? [i1, i2].filter(Boolean).sort()
         : [i1, i2, i3].filter(Boolean).sort();
@@ -1559,7 +1559,7 @@ function toggleFavoriteStar(event, btn) {
 }
 
 function checkUnattainableItems(producedSet) {
-    // producedSet是一個 Set，包含所有可產出的物品名稱
+    // producedSet is a Set of every item that can be produced
     const unattainableList = [];
 
     for (let name in DB.items) {
@@ -1591,7 +1591,7 @@ function checkUnattainableItems(producedSet) {
    SECTION: Favorite List
    ========================================================================== */
 
-// [修改] toggleFavorite：改為接受不定數量的原料，最後一個參數固定為產物名
+// toggleFavorite: takes any number of ingredients; the last argument is always the product name
 function toggleFavorite(...args) {
     const out = args[args.length - 1];
     const inputs = args.slice(0, -1);
@@ -1617,14 +1617,14 @@ function renderCauldronFavorites() {
         return;
     }
 
-    // 1. 按产出物品分组
+    // 1. Group by output item
     const grouped = {};
     favs.forEach(f => {
         if (!grouped[f.output]) grouped[f.output] = [];
         grouped[f.output].push(f);
     });
 
-    // 2. 渲染卡片
+    // 2. Render the cards
     const sortedOutputs = Object.keys(grouped).sort((a, b) => {
         const targetA = DB.items[a]?.cauldronTarget ?? Infinity;
         const targetB = DB.items[b]?.cauldronTarget ?? Infinity;
@@ -1642,7 +1642,7 @@ function renderCauldronFavorites() {
         
         const items = grouped[outName];
         const card = document.createElement('div');        
-        card.className = 'node cauldron-card'; // 收藏夹默认不折叠，或者保持 active        
+        card.className = 'node cauldron-card'; // Favorites are not collapsed by default
         card.innerHTML = `
             <div class="node-content compact-card" onclick="this.parentElement.classList.toggle('collapsed')">
                 <span class="tree-arrow">▼</span>
@@ -1663,7 +1663,7 @@ function renderCauldronFavorites() {
                             ${f.inputs.map(name => 
                                 DB.items[name] 
                                     ? `<img src="img/item${DB.items[name].id}.png" class="item-icon-small">${name}` 
-                                    : `<span style="color:var(--warn);" title="找不到的物品名称">⚠️${name}</span>`
+                                    : `<span style="color:var(--warn);" title="Item name not found">⚠️${name}</span>`
                             ).join(' + ')}
                         </span>
                         <button class="swap-btn" style="color:var(--warn); border-color:var(--warn);" 
@@ -1687,14 +1687,14 @@ function removeFavorite(idx) {
 }
 
 /**
- * 导出当前 Profile 的收藏夹为文本格式 (.txt)
- * 格式：物品1 + 物品2 (+ 物品3) = 产物
+ * Export the current profile's favorites as text (.txt)
+ * Format: Item1 + Item2 (+ Item3) = Product
  */
 function exportCauldronFavorites() {
     const favs = cauldronState.favorites;
     if (favs.length === 0) return alert("No recipes to export.");
     
-    // 转换为一行一个配方的格式
+    // One recipe per line
     const lines = favs.map(f => {
         return `${f.inputs.join(' + ')} = ${f.output}`;
     });
@@ -1711,8 +1711,8 @@ function exportCauldronFavorites() {
 }
 
 /**
- * 从文本文件导入配方
- * 预期格式：物品1 + 物品2 (+ 物品3) = 产物
+ * Import recipes from a text file
+ * Expected format: Item1 + Item2 (+ Item3) = Product
   */
 function importCauldronFavorites() {
     const input = document.createElement('input');
@@ -1724,25 +1724,25 @@ function importCauldronFavorites() {
         reader.onload = readerEvent => {
             try {
                 const content = readerEvent.target.result;
-                const lines = content.split(/\r?\n/); // 兼容 Windows 和 Unix 换行符
+                const lines = content.split(/\r?\n/); // Works with both Windows and Unix line endings
                 const currentFavs = cauldronState.favorites;
                 let importCount = 0;
 
                 lines.forEach(line => {
-                    if (!line.trim()) return; // 跳过空行
+                    if (!line.trim()) return; // Skip empty lines
 
-                    // 解析 "输入 = 输出"
+                    // Parse "inputs = output"
                     const parts = line.split('=');
                     if (parts.length !== 2) return;
 
                     const output = parts[1].trim();
                     const inputs = parts[0].split('+').map(i => i.trim());
 
-                    // 校验：支援 2 或 3 個輸入，且产物存在于数据库
+                    // Validate: 2 or 3 inputs, and the product exists in the database
                     if ((inputs.length === 2 || inputs.length === 3) && DB.items[output]) {
                         const sortedNew = [...inputs].sort();
                         
-                        // 去重检查
+                        // Skip duplicates
                         const isExist = currentFavs.some(f => 
                             f.output === output && 
                             JSON.stringify([...f.inputs].sort()) === JSON.stringify(sortedNew)
@@ -1773,7 +1773,7 @@ function importCauldronFavorites() {
 }
 
 /**
- * 将收藏夹同步到主数据库 (DB.recipes)
+ * Sync favorites into the main database (DB.recipes)
  */
 function syncCauldronToMainDB(notify = false) {
     const favs = cauldronState.favorites;
@@ -1781,10 +1781,10 @@ function syncCauldronToMainDB(notify = false) {
     //if (favs.length === 0) return alert("No recipes to sync.");
     //if (!confirm(`This will sync ${favs.length} recipes to the main calculator. Continue?`)) return;
 
-    // 1. 移除旧的自动生成配方
+    // 1. Remove the old auto-generated recipes
     DB.recipes = DB.recipes.filter(r => !r.id.startsWith("AUTO_GENERATED_CAULDRON"));
 
-    // 2. 转换并导入
+    // 2. Convert and import
     let importedCount = 0;
     favs.forEach((fav, index) => {
 
@@ -1793,19 +1793,19 @@ function syncCauldronToMainDB(notify = false) {
             return DB.items[input] ? input : queryDualItemName(input);
         });
         const outputDef = DB.items[outputName];
-        // 檢查目標物品是否存在, 檢查 inputs 陣列中的所有名稱是否都在 DB 中
+        // Check that the target item and every name in inputs exist in DB
         const isValid = outputDef !== undefined && 
                         inputNames.every(name => DB.items[name] !== undefined);
         if (!isValid) return;
 
-        // 计算插值数据
+        // Compute the interpolated data
         const stats = getCauldronStats(outputDef.cauldronTarget || 0);
 
-        // 处理输入物品计数 (例如 [Plank, Plank, Stone] -> {Plank: 2, Stone: 1})
+        // Count the input items (e.g. [Plank, Plank, Stone] -> {Plank: 2, Stone: 1})
         const inputCounts = {};
         let itemIdString = "";
         inputNames.forEach(name => {
-            // 對於原料或聖物, 它們的maxStack是負數, 每次只會使用一小部分
+            // Raw materials and relics have negative maxStack; each use takes only a fraction
             const inputDef = DB.items[name];
             let inputCount = 1;
             if (inputDef?.maxStack && inputDef.maxStack < 0) inputCount = 1.0 / (-inputDef.maxStack);
@@ -1820,9 +1820,9 @@ function syncCauldronToMainDB(notify = false) {
             inputs: inputCounts,
             outputs: { [outputName]: 1 },
             baseTime: parseFloat(stats.time),
-            // 注意：主数据库的 recipes 通常不直接存 heatCost，
-            // 但为了兼容计算逻辑，我们可以把它作为一个特殊属性存入
-            // 如果计算引擎支持读取配方级热耗，这里可以生效
+            // Note: main database recipes don't usually store heatCost,
+            // but it's stored as a special property so the calculation logic can use it
+            // if the calculation engine reads per-recipe heat cost
             heatCost: parseFloat(stats.heat) 
         };
 
@@ -1840,7 +1840,7 @@ function syncCauldronToMainDB(notify = false) {
 
 let _cauldronModalState = {
     targetItem: null,
-    cauldronType: 0,    // 0=普通(3格), 1=高級(2格)
+    cauldronType: 0,    // 0 = normal (3 slots), 1 = advanced (2 slots)
     slots: [null, null, null],
 };
 
@@ -1874,8 +1874,8 @@ function _switchCauldronModalType(type) {
 }
 
 /**
- * 計算目標 item 的 cauldronTarget 上下界
- * 排序所有 validTargets 依 cauldronTarget，取鄰近點的中位數為界
+ * Lower and upper cauldronTarget bounds for the target item:
+ * sort all validTargets by cauldronTarget and use the midpoints to the neighbors as bounds
  */
 function _getCauldronTargetBounds(targetItem) {
     const sorted = Object.keys(DB.items)
@@ -1889,15 +1889,15 @@ function _getCauldronTargetBounds(targetItem) {
     const self = sorted[idx].target;
     const lower = idx > 0
         ? (sorted[idx - 1].target + self) / 2
-        : null; // 無左鄰
+        : null; // No left neighbor
     const upper = idx < sorted.length - 1
         ? (self + sorted[idx + 1].target) / 2
-        : null; // 無右鄰
+        : null; // No right neighbor
 
     return { self, lower, upper };
 }
 
-// 複用公用函式 resolveCauldronOutput3 / resolveCauldronOutput2
+// Reuses resolveCauldronOutput3 / resolveCauldronOutput2
 function _calcCauldronModalResult(slots, cauldronType) {
     const slotCount = cauldronType === 1 ? 2 : 3;
     const filled = slots.slice(0, slotCount);
@@ -1921,17 +1921,17 @@ function _renderCauldronRecipeModal() {
     const slotCount = cauldronType === 1 ? 2 : 3;
     const body = document.getElementById('cauldron-recipe-modal-body');
 
-    // ── T 值與輸出計算 ──
+    // ── T value and output ──
     const result = _calcCauldronModalResult(slots, cauldronType);
     const T = result ? result.T : null;
     const currentOutput = result ? result.output : null;
     const allFilled = T !== null;
     const isMatch = allFilled && currentOutput === targetItem;
 
-    // ── 目標上下界 ──
+    // ── Target bounds ──
     const bounds = _getCauldronTargetBounds(targetItem);
 
-    // ── 收藏狀態 ──
+    // ── Favorite state ──
     const favs = cauldronState.favorites || [];
     const favCount = favs.filter(f => f.output === currentOutput && f.inputs.length === slotCount).length;
     const sortedCurrentKey = slots.slice(0, slotCount).filter(Boolean).sort().join(',');
@@ -1948,8 +1948,8 @@ function _renderCauldronRecipeModal() {
                 onclick="_switchCauldronModalType(1)">${t('Advanced Cauldron')}</button>
         </div>`;
 
-    // ── Slots + ctrl 列 ──
-    // 固定渲染 3 格，高級模式第 3 格隱藏（保留佔位）
+    // ── Slots + ctrl row ──
+    // Always render 3 slots; in advanced mode the 3rd is hidden (keeps its space)
     let slotsHtml = '<div style="display:flex; gap:8px; align-items:flex-start;">';
     for (let i = 0; i < 3; i++) {
         const hidden = i >= slotCount;
@@ -1959,7 +1959,7 @@ function _renderCauldronRecipeModal() {
 
         slotsHtml += `
             <div style="display:flex; flex-direction:column; align-items:center; gap:4px; ${hidden ? 'visibility:hidden;' : ''}">
-                <!-- picker 按鈕 -->
+                <!-- picker button -->
                 <button class="cauldron-slot-btn ${name ? 'active' : ''}"
                     onclick="_pickCauldronModalSlot(${i})"
                     style="display:flex; align-items:center; gap:4px; padding:5px 8px;
@@ -1970,7 +1970,7 @@ function _renderCauldronRecipeModal() {
                         : '<span style="opacity:0.4; font-size:1.1em;">＋</span>'}
                     <span>${name ?? (t('Set Input') + (i + 1))}</span>
                 </button>
-                <!-- cost 控制列：無論有無選取都佔位 -->
+                <!-- cost control row: takes space whether or not something is selected -->
                 <div style="display:flex; align-items:center; gap:3px; height:24px;">
                     ${name ? `
                         <button class="swap-btn" onclick="_shiftCauldronModalSlot(${i}, -1)">-</button>
@@ -1984,7 +1984,7 @@ function _renderCauldronRecipeModal() {
     }
     slotsHtml += '</div>';
 
-    // ── 輸出結果列 ──
+    // ── Output row ──
     let resultHtml = '';
     if (allFilled && currentOutput) {
         const outDef = DB.items[currentOutput] || {};
@@ -1999,7 +1999,7 @@ function _renderCauldronRecipeModal() {
             </div>`;
     }
 
-    // ── 目標 cauldronTarget 及上下界 ──
+    // ── Target cauldronTarget and bounds ──
     let boundsHtml = `
             <div style="font-size:0.8em; color:#aaa; display:flex; align-items:center; gap:8px;">
                 <img src="img/item${DB.items[targetItem]?.id ?? 0}.png" width="20" height="20">
@@ -2012,7 +2012,7 @@ function _renderCauldronRecipeModal() {
     }
     boundsHtml += `</div>`;
 
-    // ── T 值及與區間的差 ──
+    // ── T value and its distance from the interval ──
     let tInfoHtml = '';
     if (bounds) {
         if (!allFilled) {
@@ -2047,7 +2047,7 @@ function _renderCauldronRecipeModal() {
         }
     }
 
-    // ── 底部按鈕列 ──
+    // ── Bottom button row ──
     const bottomHtml = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">            
             <span style="font-size:0.8em; color:#888;"><img src="img/item${DB.items[currentOutput]?.id ?? 0}.png" width="18" height="18"> ${t('Current Product')} ${t('Saved Recipes')} : ${favCount}</span>
@@ -2081,7 +2081,7 @@ function _renderCauldronRecipeModal() {
 }
 
 /**
- * 和 cauldron page 的 shiftFilterItem 相同邏輯，但作用在 modal slots
+ * Same logic as shiftFilterItem on the cauldron page, but for the modal slots
  */
 function _shiftCauldronModalSlot(slotIdx, delta) {
     const list = Object.keys(DB.items)
@@ -2105,7 +2105,7 @@ function _pickCauldronModalSlot(slotIdx) {
     const originalSelectItem = window.selectItem;
     window.selectItem = (name) => {
         if (!isVaildCandidate(name)) {
-            alert(`"${name}" 不是有效的煉金原料（無 cauldronCost）`);
+            alert(`"${name}" is not a valid cauldron ingredient (no cauldronCost)`);
             window.selectItem = originalSelectItem;
             return;
         }
@@ -2140,7 +2140,7 @@ function _applyCauldronModalRecipe() {
     const inputs = slots.slice(0, slotCount).filter(Boolean).sort();
     if (inputs.length < slotCount) return;
 
-    // 1. 確保已加入收藏
+    // 1. Make sure it's a favorite
     const favs = cauldronState.favorites;
     const key = inputs.join('|');
     if (!favs.some(f => f.output === targetItem && [...f.inputs].sort().join('|') === key)) {
@@ -2149,7 +2149,7 @@ function _applyCauldronModalRecipe() {
     saveCauldronSettings();
     renderCauldronFavorites();
 
-    // 2. 同步到主 DB 並套用對應 recipe
+    // 2. Sync to the main DB and apply the matching recipe
     syncCauldronToMainDB();
 
     const matchedRecipe = (DB.recipes || []).find(r => {
@@ -2162,7 +2162,7 @@ function _applyCauldronModalRecipe() {
         persist();
     }
 
-    // 3. 關閉兩個 modal 並重算
+    // 3. Close both modals and recalculate
     closeModal('cauldron-recipe-modal');
     closeModal('recipe-modal');
     calculate();

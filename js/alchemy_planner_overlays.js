@@ -5,7 +5,7 @@
    SECTION: PLAN LIBRARY UI - Toolbar Dropdown
    ========================================================================== */
 
-/** 重繪 toolbar 上的方案下拉選單，選中項對應 activePlanId */
+/** Redraw the plan dropdown on the toolbar, with activePlanId selected */
 function renderPlannerToolbarSelect() {
     const sel = document.getElementById('planner-plan-select');
     if (!sel) return;
@@ -18,10 +18,10 @@ function renderPlannerToolbarSelect() {
         }).join('');
 }
 
-/** 切換目前作用中的方案：重新指向 plannerState、重繪整個畫布 */
+/** Switch the active plan: repoint plannerState and redraw the whole canvas */
 function switchPlannerPlan(planId) {
     if (!plannerLibrary.plans[planId] || planId === plannerLibrary.activePlanId) return;
-    // 暫存目前 plan 的 viewport，供之後切回來時恢復
+    // Remember the current plan's viewport for when we switch back
     _plannerViewportCache[plannerLibrary.activePlanId] = { ..._plannerSettings.viewport };
     plannerLibrary.activePlanId = planId;
     _activatePlanData(planId);
@@ -32,10 +32,10 @@ function switchPlannerPlan(planId) {
 
     const cachedViewport = _plannerViewportCache[planId];
     if (cachedViewport) {
-        // 之前在本次 session 中已經開過這個 plan -> 恢復當時的視角
+        // This plan was already opened this session -> restore that view
         _plannerSettings.viewport = { ...cachedViewport };
     } else {
-        // 本次 session 第一次開啟這個 plan -> 自動置中縮放 (plannerFitToView 內部會自動 savePlannerSettings)
+        // First time opening this plan this session -> fit to view (plannerFitToView calls savePlannerSettings itself)
         plannerFitToView();
         _plannerViewportCache[planId] = { ..._plannerSettings.viewport };
     }
@@ -43,7 +43,7 @@ function switchPlannerPlan(planId) {
     applyPlannerViewportTransform();
     renderPlannerToolbarSelect();
     updatePlannerUndoRedoButtons();
-    savePlannerLibraryMeta(); // 只是切換選中對象，不算編輯內容
+    savePlannerLibraryMeta(); // Only the selection changed, not a content edit
 }
 
 function _escapeHtml(str) {
@@ -65,21 +65,21 @@ function _formatPlannerTime(ts) {
    SECTION: PLAN LIBRARY UI - Manage Plans Modal
    ========================================================================== */
 
-let _plannerManageSelectedId = null; // 「方案管理」Modal 內目前選中(highlight)的 plan id
+let _plannerManageSelectedId = null; // Plan id currently selected (highlighted) in the Manage Plans modal
 
-/** 開啟「方案管理」Modal，預設選中目前作用中的方案 */
+/** Open the Manage Plans modal with the active plan selected */
 function openPlannerManageModal() {
     _plannerManageSelectedId = plannerLibrary.activePlanId;
     renderPlannerManageList();
     document.getElementById('planner-manage-modal').style.display = 'flex';
 }
 
-/** 重繪 Modal 內的方案清單 (含拖曳排序 handle 綁定 + 模組依賴關係強調) */
+/** Redraw the plan list in the modal (with drag-to-reorder handles and module dependency highlighting) */
 function renderPlannerManageList() {
     const container = document.getElementById('planner-plan-list');
     if (!container) return;
 
-    // 預先計算目前選中 plan 的依賴 / 被依賴集合，供其他列 highlight 使用
+    // Precompute what the selected plan depends on / is used by, for highlighting other rows
     let selectedDeps = new Set();
     let selectedDependents = new Set();
     if (_plannerManageSelectedId && plannerLibrary.plans[_plannerManageSelectedId]) {
@@ -136,7 +136,7 @@ function renderPlannerManageList() {
     _updatePlannerManageActionsState();
 }
 
-/** 選中/未選中時，啟用或停用「載入/重新命名/複製/刪除/匯出」這排操作按鈕 */
+/** Enable or disable the Load/Rename/Duplicate/Delete/Export buttons depending on whether a plan is selected */
 function _updatePlannerManageActionsState() {
     const row = document.getElementById('planner-plan-actions-row');
     if (!row) return;
@@ -149,7 +149,7 @@ function selectPlannerManageRow(id) {
     renderPlannerManageList();
 }
 
-/** 清單列的拖曳排序：沿用 multi-target-row 既有的 pointer event pattern */
+/** Drag-to-reorder for list rows: same pointer event pattern as multi-target-row */
 function _initPlannerPlanDragHandle(handle, row) {
     if (!handle) return;
     handle.addEventListener('pointerdown', (e) => {
@@ -198,16 +198,16 @@ function _initPlannerPlanDragHandle(handle, row) {
     });
 }
 
-/* ---- Modal 操作按鈕：載入 / 重新命名 / 複製 / 刪除 / 匯出 ---- */
+/* ---- Modal buttons: Load / Rename / Duplicate / Delete / Export ---- */
 
-/** 把 Modal 內選中的方案設為作用中方案，並關閉 Modal */
+/** Make the plan selected in the modal the active plan and close the modal */
 function managePlannerLoadSelected() {
     if (!_plannerManageSelectedId) return;
     switchPlannerPlan(_plannerManageSelectedId);
     closeModal('planner-manage-modal');
 }
 
-/** 就地將選中列的名稱換成輸入框，方便重新命名 */
+/** Replace the selected row's name with an input box for renaming in place */
 function managePlannerRenameSelected() {
     const id = _plannerManageSelectedId;
     if (!id) return;
@@ -235,7 +235,7 @@ function managePlannerRenameSelected() {
     });
 }
 
-/** 複製選中的方案 (含全部節點/連線)，插入在原方案之後 */
+/** Duplicate the selected plan (all nodes/edges) and insert it after the original */
 function managePlannerDuplicateSelected() {
     const id = _plannerManageSelectedId;
     if (!id) return;
@@ -253,7 +253,7 @@ function managePlannerDuplicateSelected() {
     renderPlannerManageList();
 }
 
-/** 刪除選中的方案；若刪掉的是目前作用中方案，自動切換到清單第一筆；不可刪到 0 個方案 */
+/** Delete the selected plan; if it's the active one, switch to the first in the list; can't delete the last plan */
 function managePlannerDeleteSelected() {
     const id = _plannerManageSelectedId;
     if (!id) return;
@@ -261,7 +261,7 @@ function managePlannerDeleteSelected() {
 
     delete plannerLibrary.plans[id];
     plannerLibrary.planOrder = plannerLibrary.planOrder.filter(pid => pid !== id);
-    delete plannerHistory[id]; // 該 plan 的 undo/redo 歷史一併清除
+    delete plannerHistory[id]; // Also clear that plan's undo/redo history
 
     if (plannerLibrary.planOrder.length === 0) {
         const plan = _createPlan(t('Default Plan', 'ui'));
@@ -285,7 +285,7 @@ function managePlannerDeleteSelected() {
     renderPlannerManageList();
 }
 
-/** 將選中方案匯出成單一 .json 檔 (含 name + data，方便匯入時直接還原名稱) */
+/** Export the selected plan as a single .json file (name + data, so importing restores the name) */
 function managePlannerExportSelected() {
     const id = _plannerManageSelectedId;
     if (!id) return;
@@ -329,9 +329,9 @@ function managePlannerImportAsModule() {
     closeModal('planner-manage-modal');
 }
 
-/* ---- Modal 底部操作：新方案 / 匯入 (與選中列無關的全域操作) ---- */
+/* ---- Modal footer: New plan / Import (global actions, not tied to the selected row) ---- */
 
-/** 建立一個空白新方案並直接進入重新命名狀態 */
+/** Create a new empty plan and go straight into renaming it */
 function managePlannerCreateNew() {
     const plan = _createPlan(t('New Plan', 'ui'));
     plannerLibrary.plans[plan.id] = plan;
@@ -343,7 +343,7 @@ function managePlannerCreateNew() {
     managePlannerRenameSelected();
 }
 
-/** 從檔案匯入一個方案 (新增一筆到清單，不覆蓋既有方案) */
+/** Import a plan from a file (added to the list, never overwrites an existing plan) */
 function managePlannerImport() {
     const input = document.createElement('input');
     input.type = 'file';
@@ -456,8 +456,8 @@ function renderPlannerNodeModalBody(nodeId) {
     `;
 }
 
-/** 顯示目前配方的內容(套用 node 自己的 recipeModifiers 後)，固定佔用一塊版面，
- *  並依機器種類提供對應的修飾控制 (高級煉金爐催化劑 / 悖論坩堝自訂輸入) */
+/** Show the current recipe (with the node's own recipeModifiers applied) in a fixed area,
+ *  plus modifier controls for the machine type (advanced machine catalysts / Paradox Crucible custom input) */
 function _buildPlannerNodeModifierHtml(node, rawRecipe) {
     if (!rawRecipe) {
         return `<div class="planner-picker-empty">${t('No recipe selected', 'ui')}</div>`;
@@ -545,7 +545,7 @@ function _plannerFormatIOList(ioObj) {
     }).join('');
 }
 
-/** 列出所有輸出 mainOut 的配方 (與目前節點的配方同群)，點擊即切換該節點的 recipeId */
+/** List every recipe that outputs mainOut (same group as the node's recipe); clicking one switches the node's recipeId */
 function _buildPlannerNodeRecipeSwitchHtml(node, mainOut) {
     const candidates = getRecipesFor(mainOut);
     if (!candidates || candidates.length === 0) {
@@ -576,7 +576,7 @@ function _buildPlannerNodeRecipeSwitchHtml(node, mainOut) {
     }).join('');
 }
 
-/** 重新整理 modal 內容 + 節點卡片/連線/摘要面板，並存檔 */
+/** Refresh the modal content + node cards/edges/summary panel, and save */
 function _plannerNodeModalRefresh(nodeId) {    
     recomputeAndRefreshPlanner();
     renderPlannerNodeModalBody(nodeId);
@@ -637,8 +637,8 @@ function onPlannerThermalHeightChange(val) {
     calculate();
 }
 
-/** 切換節點的配方 (依舊配方 mainOut 分組挑選)；因催化劑/自訂輸入是綁定特定配方 id 的，
- *  換配方後重置該節點的 recipeModifiers。失效的連線由 plannerResolveFlows() 自動清除。 */
+/** Switch the node's recipe (picked from the old recipe's mainOut group). Catalysts/custom inputs are tied to a recipe id,
+ *  so the node's recipeModifiers are reset. plannerResolveFlows() removes edges that become invalid. */
 function plannerSwitchNodeRecipe(nodeId, recipeId) {
     const node = plannerState.nodes[nodeId];
     if (!node || node.recipeId === recipeId) return;
@@ -650,10 +650,10 @@ function plannerSwitchNodeRecipe(nodeId, recipeId) {
 }
 
 /**
- * 針對 node 的每個有連線的 port，計算「應該滿足的目標速率」：
- * 對該 port 所有連出/連入的 edge，加總 (該edge目前流量 + 對方那一端 port 的 remaining)。
- * 若 |target - port.rate| 太小則跳過 (視為已滿足)。
- * 回傳可讓按鈕直接套用的 { item, target, current, delta, newMachineCount } 清單，分 inputs/outputs。
+ * For each connected port of the node, compute the target rate it should meet:
+ * for every edge on the port, sum (the edge's current flow + the remaining amount at the other end's port).
+ * Skips ports where |target - port.rate| is tiny (already satisfied).
+ * Returns { item, target, current, delta, newMachineCount } entries the buttons can apply, split into inputs/outputs.
  */
 function _plannerGetNodeMismatchButtons(node, flows) {
     const ports = flows.nodePortsCache[node.id];
@@ -671,7 +671,7 @@ function _plannerGetNodeMismatchButtons(node, flows) {
         portList.forEach(port => {
             const key = plannerPortKey(node.id, port.item, dir);
             const edgeIds = flows.portConnections[key] || [];
-            if (edgeIds.length === 0) return; // 未連線，跳過
+            if (edgeIds.length === 0) return; // Not connected, skip
 
             let target = 0;
             edgeIds.forEach(eid => {
@@ -689,7 +689,7 @@ function _plannerGetNodeMismatchButtons(node, flows) {
             if (Math.abs(delta) < 0.001) return;
 
             const perMachineRate = perMachineRateOf[dir][port.item] || 0;
-            if (perMachineRate <= 0) return; // 沒有單機速率無法反推機器數變化
+            if (perMachineRate <= 0) return; // Without a per-machine rate the machine count change can't be derived
 
             let newMachineCount = node.machineCount + delta / perMachineRate;
             newMachineCount = Math.max(0, newMachineCount);
@@ -703,7 +703,7 @@ function _plannerGetNodeMismatchButtons(node, flows) {
     return { inputs: buildList(ports.inputs, 'in'), outputs: buildList(ports.outputs, 'out') };
 }
 
-/** 建立「滿足連線」section 的 HTML；若左右都沒有需要調整的 port，回傳空字串 (不顯示整個 section) */
+/** HTML for the "Satisfy connections" section; empty string (section hidden) if no port on either side needs adjusting */
 function _buildPlannerNodeMismatchSectionHtml(node, flows) {
     const { inputs, outputs } = _plannerGetNodeMismatchButtons(node, flows);
     if (inputs.length === 0 && outputs.length === 0) return '';
@@ -741,7 +741,7 @@ function _buildPlannerNodeMismatchSectionHtml(node, flows) {
         </div>`;
 }
 
-/** hover 按鈕時，在 section 底部的括號內即時顯示「若套用後」機器數會變化多少 */
+/** On button hover, show in the brackets at the bottom how much the machine count would change */
 function onPlannerMismatchHover(btn, show) {
     const nodeId = btn.dataset.node;
     const el = document.getElementById('planner-mismatch-mc-preview-' + nodeId);
@@ -758,7 +758,7 @@ function onPlannerMismatchHover(btn, show) {
     el.style.color = delta >= 0 ? 'var(--profit)' : 'var(--danger)';
 }
 
-/** 按下按鈕：直接把 machineCount 設為預先算好的目標值 (可能增加或減少) */
+/** On click: set machineCount to the precomputed target (may go up or down) */
 function plannerApplyPortMismatch(btn) {
     const nodeId = btn.dataset.node;
     const node = plannerState.nodes[nodeId];
@@ -771,7 +771,7 @@ function plannerApplyPortMismatch(btn) {
 
 
 /* ==========================================================================
-   SECTION: Edge Modal (點擊 label / 連線本體)
+   SECTION: Edge Modal (click the label / the edge itself)
    ========================================================================== */
 
 function openPlannerEdgeModal(edgeId) {
@@ -797,7 +797,7 @@ function openPlannerEdgeModal(edgeId) {
         return '?';
     }
 
-    /** 渲染單一方向 (out=供給端優先序 / in=需求端優先序) 的顺位列；沒有兄弟 edge (siblings<=1) 時回傳空字串 */
+    /** Render the priority rows for one direction (out = supplier priority / in = consumer priority); empty string when there are no sibling edges (siblings <= 1) */
     function _buildPlannerEdgePriorityRowHtml(edgeId, nodeId, item, dir, label) {
         const siblings = plannerGetSiblingEdges(nodeId, item, dir);
         if (siblings.length <= 1) return '';
@@ -893,10 +893,10 @@ function deletePlannerEdge(edgeId) {
 }
 
 /**
- * 使用者輸入這條 edge 想要的流量 F，將 fromNode/toNode 的 machineCount 調整到
- * 剛好能供給/消耗 F (加上該 port 上其他 edge 目前的流量)。
- * 分配優先權仍依 createdAt 決定，若同一 port 上還有更早建立的 edge，
- * 實際重新計算後的流量可能與 F 有落差 (approximation，可接受)。
+ * Given the flow F the user wants on this edge, adjust the fromNode/toNode machineCount
+ * to supply/consume exactly F (plus the current flow of the other edges on that port).
+ * Allocation priority still follows createdAt, so if the port has older edges,
+ * the recalculated flow may differ a little from F (an acceptable approximation).
  */
 function plannerApplyEdgeFlowInput(edgeId, inputEl) {
     const edge = plannerState.edges[edgeId];
@@ -938,8 +938,8 @@ function plannerApplyEdgeFlowInput(edgeId, inputEl) {
         }
     }
 
-    // Link mode: 將 fromNode 的變化比例套用到它的上游、toNode 的變化比例套用到它的下游。
-    // 兩邊的交集節點 (例如環狀連線) 排除在外，避免被套用兩次比例。
+    // Link mode: apply fromNode's change ratio to its upstream and toNode's ratio to its downstream.
+    // Nodes in both sets (e.g. loops) are excluded so the ratio isn't applied twice.
     if (_plannerLinkMode) {
         const upstreamIds = fromNode ? getPlannerUpstreamNodeIds(edge.fromNode) : new Set();
         const downstreamIds = toNode ? getPlannerDownstreamNodeIds(edge.toNode) : new Set();
@@ -967,7 +967,7 @@ function plannerApplyEdgeFlowInput(edgeId, inputEl) {
     const newFlows = recomputeAndRefreshPlanner();
     savePlannerState();
 
-    // 用重新計算後的實際流量刷新 modal 顯示 (可能與輸入值有些微落差)
+    // Refresh the modal with the actual recalculated flow (may differ slightly from the input)
     const actualFlow = newFlows.edgeFlow[edgeId] || 0;
     const flowLabel = document.getElementById('planner-edge-modal-current-flow');
     if (flowLabel) flowLabel.innerText = formatVal(actualFlow);
@@ -975,7 +975,7 @@ function plannerApplyEdgeFlowInput(edgeId, inputEl) {
 }
 
 /* ==========================================================================
-   SECTION: 從「拉到空白處」新增節點的配方選單
+   SECTION: Recipe menu for adding a node by dragging to empty canvas
    ========================================================================== */
 
 let _plannerPickerContext = null;
@@ -988,7 +988,7 @@ function getRecipesConsuming(item) {
 
 function openPlannerRecipePickerMenu(ctx) {
     _plannerPickerContext = ctx;
-    const consuming = ctx.originDir === 'out'; // 從輸出端拉出 -> 找「消耗這個物品」的配方；從輸入端拉出 -> 找「生產這個物品」的配方
+    const consuming = ctx.originDir === 'out'; // Dragged from an output -> recipes that consume the item; from an input -> recipes that produce it
     const candidates = consuming ? getRecipesConsuming(ctx.item) : getRecipesFor(ctx.item);
 
     _plannerPickerCandidates = candidates.map(r => {
@@ -1095,8 +1095,8 @@ function choosePlannerRecipeFromPicker(idx) {
 }
 
 /**
- * 使用者從下拉選單選定配方後，建立一個新節點並自動連上原本拖曳的那條線。
- * 機器數會被反推，讓新節點在這個物品上的 input/output 量剛好等於拉出時的可用流量。
+ * After a recipe is picked from the menu, create a new node and connect it to the dragged line.
+ * The machine count is derived so the new node's input/output for this item equals the available flow.
  */
 function createPlannerNodeFromPicker(candidate, ctx) {
     const recipe = candidate.recipe;
@@ -1132,7 +1132,7 @@ function createPlannerNodeFromPicker(candidate, ctx) {
    SECTION: Rate Per Machine Tooltip 
    ========================================================================== */
 
-/** 依 plannerGetNodeRates() 的結果，組出 hover tooltip 的 HTML 內容 */
+/** Build the hover tooltip HTML from plannerGetNodeRates() */
 function buildPlannerRateTooltipHtml(rates) {
     if (!rates) return '';
 
@@ -1189,7 +1189,7 @@ function showPlannerRateTooltip(anchorEl, rates) {
     let left = rect.left;
     let top = rect.top - tipRect.height - 6;
     if (left + tipRect.width > window.innerWidth) left = window.innerWidth - tipRect.width - 8;
-    if (top < 4) top = rect.bottom + 6; // 上方空間不足時改顯示在下方
+    if (top < 4) top = rect.bottom + 6; // Not enough room above, show it below
     tip.style.left = Math.max(4, left) + 'px';
     tip.style.top = top + 'px';
 }
@@ -1203,9 +1203,9 @@ function hidePlannerRateTooltip() {
    SECTION: Edge Hover Tooltip (Item / Rate / Belt)
    ========================================================================== */
 
-let _plannerEdgeTooltipSize = null; // 快取 {width, height}，避免每次 mousemove 都 reflow
+let _plannerEdgeTooltipSize = null; // Cached {width, height} to avoid a reflow on every mousemove
 
-/** 組出 edge hover tooltip 的 HTML 內容：物品名稱、目前流量、傳送帶需求數(可選) */
+/** Edge hover tooltip HTML: item name, current flow, belts needed (optional) */
 function buildPlannerEdgeTooltipHtml(itemName, flow, beltCount) {
     const def = DB.items[itemName] || {};
     let html = `<div class="planner-rate-tooltip-row">
@@ -1225,7 +1225,7 @@ function buildPlannerEdgeTooltipHtml(itemName, flow, beltCount) {
     return html;
 }
 
-/** 顯示 edge hover tooltip，位置跟隨游標 (與 showPlannerRateTooltip 共用同一個 CSS class，但用滑鼠座標定位) */
+/** Show the edge hover tooltip following the cursor (same CSS class as showPlannerRateTooltip, positioned by mouse) */
 function showPlannerEdgeTooltip(evt, itemName, flow, beltCount) {
     hidePlannerRateTooltip();
     const tip = document.createElement('div');
@@ -1233,11 +1233,11 @@ function showPlannerEdgeTooltip(evt, itemName, flow, beltCount) {
     tip.className = 'planner-rate-tooltip';
     tip.innerHTML = buildPlannerEdgeTooltipHtml(itemName, flow, beltCount);
     document.body.appendChild(tip);
-    _plannerEdgeTooltipSize = { width: tip.offsetWidth, height: tip.offsetHeight }; // 只測量這一次
+    _plannerEdgeTooltipSize = { width: tip.offsetWidth, height: tip.offsetHeight }; // Measured only once
     _positionPlannerEdgeTooltip(evt);
 }
 
-/** 滑鼠在 edge 上移動時，讓 tooltip 跟隨游標 */
+/** Make the tooltip follow the cursor while moving over an edge */
 function movePlannerEdgeTooltip(evt) {
     if (!document.getElementById('planner-rate-tooltip')) return;
     _positionPlannerEdgeTooltip(evt);
@@ -1256,7 +1256,7 @@ function _positionPlannerEdgeTooltip(evt) {
     tip.style.top = Math.max(4, top) + 'px';
 }
 
-/** edge 離開 hover 時，直接複用既有的 hidePlannerRateTooltip() 移除容器 */
+/** On edge hover end, reuse hidePlannerRateTooltip() to remove the container */
 function hidePlannerEdgeTooltip() {
     hidePlannerRateTooltip();
 }
@@ -1342,7 +1342,7 @@ function togglePlannerSummarySection(key) {
     savePlannerSettings();
 }
 
-/** 依 flows 彙總: 金錢/燃料/肥料消耗、機器數、輸出剩餘、輸入短缺 */
+/** Summary from flows: money/fuel/fertilizer use, machine counts, output surplus, input shortfall */
 function computePlannerSummaryStats(flows) {
     const machineCounts = {};
     let heatTotal = 0, fertTotal = 0, goldTotal = 0, steamTotal = 0;

@@ -517,7 +517,7 @@ window.ALCHEMY_DB = {
         { "id": "Oblivion Essence (Limestone)", "machine": "Paradox Crucible", "inputs": { "Limestone": 1 }, "outputs": { "Oblivion Essence": 1 }, "baseTime": 3.333 },
         { "id": "Oblivion Essence (Gentian)", "machine": "Paradox Crucible", "inputs": { "Gentian": 1 }, "outputs": { "Oblivion Essence": 1 }, "baseTime": 3.750 },
         { "id": "Oblivion Essence (Silver Coin x2)", "machine": "Paradox Crucible", "inputs": { "Silver Coin": 2 }, "outputs": { "Oblivion Essence": 1 }, "baseTime": 0.79 },
-        // 自訂輸入配方：inputs 為空，實際內容由 DB.settings.recipeModifiers[id].customInput 動態決定
+        // Custom-input recipe: inputs is empty; the actual input comes from DB.settings.recipeModifiers[id].customInput
         { "id": "Oblivion Essence (Custom)", "machine": "Paradox Crucible", "inputs": {}, "outputs": { "Oblivion Essence": 1 }, "baseTime": 1, "customInputSlot": true },
         { "id": "Vitality Essence", "machine": "Paradox Crucible", "inputs": { "Oblivion Essence": 1 }, "outputs": { "Vitality Essence": 1 }, "baseTime": 5.0 },
 

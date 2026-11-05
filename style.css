@@ -486,7 +486,7 @@ input:checked + .slider-switch:before { transform: translateX(16px); }
 .update-btns{display:flex;gap:10px;}.update-btn{background:#000;color:#fff;border:none;padding:5px 15px;border-radius:4px;cursor:pointer;font-size:0.9em;}
 .update-btn:hover{background:#333;}.update-btn.secondary{background:transparent;color:#000;border:1px solid #000;}
 
-/* Item Picker Styles 分類過濾列 */
+/* Item Picker: category filter bar */
 
 .picker-modal-content {
     width: 640px;
@@ -505,15 +505,15 @@ input:checked + .slider-switch:before { transform: translateX(16px); }
 .category-btn.active { background: #4caf50; color: white; border-color: #4caf50; }
 
 
-/* 搜尋框容器 */
+/* Search box container */
 .picker-search-container { margin-bottom: 15px; position: relative; }
 #itemPickerSearch { width: 100%; background: #252525; border: 1px solid #444; color: white; padding: 10px 32px 10px 10px; border-radius: 4px; }
 .picker-search-clear { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 
 .picker-scroll-area {
-    flex: 1;           /* 重要：這會讓此區域自動填滿 Modal 剩餘的所有高度 */
-    overflow-y: auto;  /* 當內容超過剩餘高度時，只在這裡顯示捲軸 */
-    padding-right: 5px; /* 給捲軸留一點空間 */
+    flex: 1;           /* Important: makes this area fill the rest of the modal height */
+    overflow-y: auto;  /* Scroll only here when the content is taller than the space left */
+    padding-right: 5px; /* Leave room for the scrollbar */
 }
 
 .picker-grid-two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
@@ -527,7 +527,7 @@ input:checked + .slider-switch:before { transform: translateX(16px); }
     .picker-modal-content { width: 360px; height: 90vh; padding: 15px; overflow-y: scroll; scrollbar-gutter: stable; }
 }
 
-/* cauldron 最下方的物品欄*/
+/* Cauldron item bar at the bottom */
 .picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; padding: 12px; background: #252525; }
 .picker-item { background: #3a3a3a; border: 1px solid #444; padding: 10px 5px; border-radius: 4px; text-align: center; cursor: pointer; font-size: 0.9em; transition: 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
@@ -962,17 +962,17 @@ button.reset-btn:hover { background: var(--danger); color: white; }
 }
 .planner-svg-layer foreignObject { pointer-events: auto; }
 
-/* 外層 group 提供預設色；若有 edge.color 會被 inline style 覆蓋。
-   dash / chevron 兩種線都靠 currentColor 繼承顏色。 */
+/* The outer group sets the default color; edge.color overrides it with an inline style.
+   Both the dash and chevron line styles inherit it through currentColor. */
 .planner-edge-group { color: var(--accent); }
 
-/* 原版動態虛線（預設） */
+/* Animated dashed line (default) */
 .planner-edge-line {
     fill: none; stroke: currentColor; stroke-width: 2.5;
     stroke-dasharray: 6 5; animation: planner-flow-dash 0.6s linear infinite;
 }
 
-/* 靜態箭頭 chevron（edgeStyle = 1） */
+/* Static chevron arrows (edgeStyle = 1) */
 .planner-edge-chevrons {
     fill: none;
     stroke: currentColor;

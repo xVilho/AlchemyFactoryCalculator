@@ -150,7 +150,7 @@
         return applyRecipeModifiers(db, state?.recipeModifiers?.[recipe.id], recipe);
     }
 
-    // 直接依 recipe.id 取得配方並套用 modifiers，不依賴 item/preferred
+    // Look the recipe up directly by recipe.id and apply modifiers, independent of item/preferred
     function getRecipeById(db, modifiers, recipeId) {
         const recipe = (db.recipes || []).find(r => r.id === recipeId);
         if (!recipe) return null;
@@ -505,7 +505,7 @@
 
             if (!effectiveGhost) {
                 if (recipe.machine === "Bank Portal") {
-                    if (Object.keys(recipe.inputs || {}).length === 0) { // 非轉換類型
+                    if (Object.keys(recipe.inputs || {}).length === 0) { // Not a conversion recipe
                         const costPerMin = netRate * (itemDef.sellPrice || 0);
                         aggregates.rawItems[item] = (aggregates.rawItems[item] || 0) + netRate;
                         aggregates.goldPerMin += costPerMin;
@@ -524,7 +524,7 @@
                         aggregates.rawMaterialSourceMap.push({ item, gold: costPerMin, pathKey });
                         node.tags.detailsType = "raw";
                         node.tags.costEntries.push({ type: "gold", amount: costPerMin, custom: customCost !== null });
-                        node.isRaw = true; // 傳送到planner時不展開
+                        node.isRaw = true; // Not expanded when sent to the planner
                     }
                 }
             }
@@ -688,7 +688,7 @@
                 Object.keys(recipe.inputs).forEach(inputName => {
                     const qtyPerBatch = recipe.inputs[inputName];
                     const requiredInputRate = netBatches * qtyPerBatch;
-                    // 高級煉金爐的催化劑：是否展開子樹由全域設定 state.expandCatalystInputs 決定 (每種催化劑獨立)
+                    // Catalysts for advanced machines: whether to expand the subtree is set per catalyst by state.expandCatalystInputs
                     let shouldExpandChild = true;
                     if (recipe.machine === 'Advanced Athanor') {
                         const catalystType = getCatalystTypeByCharges(db.items[inputName]?.charges);
@@ -753,13 +753,13 @@
     }
 
 
-    // 用 3 次採樣 ghost pass 擬合線性映射 newFuel/newFert = A * [fuelGuess, fertGuess] + b，
-    // 直接解不動點方程 (I - A)x = b，取得初始猜測值；若無解或解不合理，視為發散
+    // Fit the linear map newFuel/newFert = A * [fuelGuess, fertGuess] + b from 3 sampled ghost passes,
+    // then solve the fixed point (I - A)x = b for an initial guess; no solution or an unreasonable one counts as divergent
     function estimateFuelFertLinearGuess(db, params, state, shouldFuel, shouldFert) {
         if (!shouldFuel && !shouldFert) return { fuelGuess: 0, fertGuess: 0, divergent: false };
 
-        // 先用 fuelGuess=fertGuess=0 跑一次，取得生產樹本身(含內部模塊此時為0)所產生的副產物池，
-        // 作為後續三次採樣共用的固定回收池近似 (一階近似：忽略池子隨 fuel/fert 增加而變動的二階效應)
+        // First run once with fuelGuess = fertGuess = 0 to get the byproduct pool of the tree itself (internal modules are 0 here),
+        // and use it as the fixed recycle pool for the three samples (first-order: ignores how the pool changes with fuel/fert)
         const basePool = {};
         buildProductionModel({
             db, params, state, isGhost: true,
@@ -802,7 +802,7 @@
         const det = (1 - a11) * (1 - a22) - a12 * a21;
 
         if (Math.abs(det) < 1e-9) {
-            // (I - A) 奇異矩陣：系統本身不存在唯一不動點 (自耗放大迴路)
+            // (I - A) is singular: there is no unique fixed point (self-consuming amplifying loop)
             return { fuelGuess: 0, fertGuess: 0, divergent: true };
         }
 
@@ -810,7 +810,7 @@
         const fertGuess = (a21 * b1 + (1 - a11) * b2) / det;
 
         if (!isFinite(fuelGuess) || !isFinite(fertGuess) || fuelGuess < -1e-6 || fertGuess < -1e-6) {
-            // 解出負值/無限大，物理上不合理，同樣視為無法平衡
+            // A negative or infinite solution is not physical, so it also counts as unbalanceable
             return { fuelGuess: 0, fertGuess: 0, divergent: true };
         }
 
@@ -867,7 +867,7 @@
                     equilibriumWarning = 'LowSupply';
                     continue;
                 }
-                // 用線性解出的值作為疊代起點，取代原本的 0 初始值，減少後續 warm-up/主迴圈所需輪數
+                // Start iterating from the linear solution instead of 0 to cut the warm-up/main loop rounds
                 fuelGuess = linearEstimate.fuelGuess;
                 fertGuess = linearEstimate.fertGuess;
             }
@@ -913,7 +913,7 @@
                 byproductGuess = cloneRecord(totalByproducts);
                 fuelGuess = newFuel;
                 fertGuess = newFert;
-                // 誤差太大(>1%)時再提示
+                // Only warn when the error is large (>1%)
                 if(maxDiff > 0.01) equilibriumWarning = 'Divergence';
                 break;
             }
@@ -929,9 +929,9 @@
 
             if (shouldFuel || shouldFert) {
                 if (i <= 20) {
-                    // --- Aitken's Δ² 外推加速 ---
-                    // 每累積滿 3 筆歷史值就嘗試外推一次，成功則直接跳到推算出的極限值並重置視窗，
-                    // 避免每輪都外推導致數值不穩定
+                    // --- Aitken's delta-squared extrapolation ---
+                    // Try to extrapolate once every 3 history values; on success jump to the estimated limit and reset the window,
+                    // instead of every round, which would be numerically unstable
                     fuelGuess = newFuel;
                     fertGuess = newFert;
                     if (shouldFuel) {
@@ -973,14 +973,14 @@
         };
     }
 
-    // Aitken's Δ² 外推：從最近 3 個疊代值推算線性收斂數列的極限，加速收斂
+    // Aitken's delta-squared: estimate the limit of a linearly converging sequence from its last 3 values
     function aitkenExtrapolate(window) {
         if (window.length < 3) return null;
         const [x0, x1, x2] = window;
         const denom = x2 - 2 * x1 + x0;
-        if (Math.abs(denom) < 1e-9) return null; // 分母趨近 0：數列已幾乎收斂或不穩定，放棄外推
+        if (Math.abs(denom) < 1e-9) return null; // Denominator near 0: already converged or unstable, skip extrapolation
         const extrapolated = x0 - ((x1 - x0) * (x1 - x0)) / denom;
-        if (!isFinite(extrapolated) || extrapolated < 0) return null; // 外推結果不合理，放棄
+        if (!isFinite(extrapolated) || extrapolated < 0) return null; // Unreasonable extrapolation, skip it
         return extrapolated;
     }
 

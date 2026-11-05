@@ -12,9 +12,7 @@
         alchemy_source_v1: 'Database editor source',
         alchemy_source_backup_v1: 'Database editor backup',
         alchemy_settings_v1: 'Settings',
-        alchemy_settings_backup_v1: 'Settings backup',
-        alchemy_i18n_source_v1: 'Translations',
-        alchemy_i18n_source_backup_v1: 'Translations backup'
+        alchemy_settings_backup_v1: 'Settings backup'
     };
     let pending = null;
 

@@ -14,23 +14,7 @@ function init() {
     
 
     if (!window.ALCHEMY_DB) { alert("Error: alchemy_db.js not found!"); }
-    if (!window.ALCHEMY_I18N) { alert("Error: alchemy_i18n.js not found!"); }
-
-    const localTranslation = localStorage.getItem(I18N_DATA_KEY);
-    if (localTranslation) {
-        try {
-            console.log("Loading local translation data...");
-            window.ALCHEMY_I18N = JSON.parse(localTranslation);
-        } catch (e) {
-            console.error("Local translation data corrupt, resetting...");
-            window.ALCHEMY_I18N = JSON.parse(JSON.stringify(window.ALCHEMY_I18N));
-        }
-    } else {
-        console.log("Loading remote translation data...");
-        window.ALCHEMY_I18N = JSON.parse(JSON.stringify(window.ALCHEMY_I18N));
-    }
-    // English only: the Chinese mode is discontinued. Convert any data saved while it was on.
-    window.ALCHEMY_I18N.enabled = false;
+    // Convert item names left over from the old Chinese mode before anything reads saved data.
     migrateChineseSavedData();
 
     const fileDB = window.ALCHEMY_DB;
@@ -79,7 +63,6 @@ function init() {
     if(!DB.settings.expandCatalystInputs) DB.settings.expandCatalystInputs = { unstable: false, fertile: false, resonant: false, eternal: false };
     if(DB.settings.thermalExtractorHeight === undefined) DB.settings.thermalExtractorHeight = 255;
 
-    translateDatabase(DB, true); // Translate DB item key
 
     prepareComboboxData();
     populateSelects(); 
@@ -94,10 +77,10 @@ function init() {
         document.getElementById('targetRate').disabled = false;
         document.getElementById('targetRate').value = urlRate;
     } else if (!DB.settings.targetItem) {
-        // 沒有指定 rate、也沒有已儲存設定時，默認啟用 "Set by Machine Count" 模式，machine count = 1
+        // With no rate given and no saved settings, default to "Set by Machine Count" mode with machine count = 1
         const machineModeToggle = document.getElementById('machineModeToggle');
         machineModeToggle.checked = true;
-        toggleControlMode(false); // 切換 UI 狀態（禁用 rate 輸入、啟用 machine 輸入）
+        toggleControlMode(false); // Switch the UI state (disable rate input, enable machine input)
     }
     
     if (urlFuel && document.querySelector(`#fuelSelect option[value="${urlFuel}"]`)) {
@@ -186,7 +169,7 @@ function loadSettingsToUI() {
         }
         if (DB.settings.machineModeToggle) {
             document.getElementById('machineModeToggle').checked = true;
-            toggleControlMode(false); // 套用禁用/啟用對應輸入框的 UI 效果
+            toggleControlMode(false); // Apply the matching enabled/disabled state to the inputs
         }
         if (DB.settings.selfFuel) {
             const btn = document.getElementById('btnSelfFuel');
@@ -324,7 +307,7 @@ function switchTab(tabName, updateUrl = true) {
         initExpPage();
     }
     if (tabName === 'calc') {
-        syncCauldronToMainDB(); // 回到計算器頁面時, 嘗試同步煉金鍋配方
+        syncCauldronToMainDB(); // When returning to the calculator, try to sync cauldron recipes
     }
 }
 
@@ -348,11 +331,11 @@ window.addEventListener('popstate', function(event) {
     isHandlingPopstate = true;
     const urlParams = new URLSearchParams(window.location.search);
 
-    // 處理 tab（若無 tab 參數則切回預設 calc）
+    // Handle the tab (fall back to calc when there is no tab parameter)
     if (urlParams.has('tab')) {
         switchTab(urlParams.get('tab'), false);
     } else {
-        switchTab('calc', false);   // 預設頁籤
+        switchTab('calc', false);   // Default tab
     }
 
     if (urlParams.has('item')) {
@@ -377,11 +360,8 @@ let _zhToEnMap = null;
 function _getZhToEnMap() {
     if (_zhToEnMap) return _zhToEnMap;
     _zhToEnMap = new Map();
-    const items = window.ALCHEMY_I18N?.items || {};
-    for (const en in items) {
-        const zh = items[en];
-        if (typeof zh === 'string' && zh && zh !== en) _zhToEnMap.set(zh, en);
-    }
+    const legacy = window.LEGACY_ZH_ITEM_NAMES || {};
+    for (const zh in legacy) _zhToEnMap.set(zh, legacy[zh]);
     return _zhToEnMap;
 }
 
@@ -411,13 +391,15 @@ function _convertZhNames(value, map, stats) {
 }
 
 function migrateChineseSavedData() {
+    // The old translation override storage is no longer used.
+    try { localStorage.removeItem('alchemy_i18n_source_v1'); localStorage.removeItem('alchemy_i18n_source_backup_v1'); } catch (e) {}
     const map = _getZhToEnMap();
     if (!map.size) return;
     const keys = [SETTINGS_KEY, 'alchemy_planner_library_v1', 'alchemy_planner_settings_v1', 'alchemy_cauldron_v1'];
     for (const key of keys) {
         try {
             const raw = localStorage.getItem(key);
-            if (!raw || !/[㐀-鿿]/.test(raw)) continue; // nothing Chinese in it
+            if (!raw || !/[\u3400-\u9fff]/.test(raw)) continue; // nothing Chinese in it
             const stats = { n: 0 };
             const converted = _convertZhNames(JSON.parse(raw), map, stats);
             if (stats.n > 0) {

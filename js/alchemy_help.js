@@ -63,10 +63,10 @@ function _injectHelpStyles() {
         @media (max-width: 720px) {
             .wiki-split-area {
                 flex-direction: column;
-                height: 100%; /* 確保撐滿父容器 */
+                height: 100%; /* Fill the parent container */
             }
 
-            /* 預設（無選取）：左側佔滿全部空間 */
+            /* Default (nothing selected): the left side takes all the space */
             .wiki-left-pane {
                 flex: 1 1 100%;
                 min-height: 0;
@@ -74,20 +74,20 @@ function _injectHelpStyles() {
                 border-right: none;
             }
             .wiki-right-pane {
-                display: none;           /* 預設隱藏 */
+                display: none;           /* Hidden by default */
                 flex: 0 0 auto;
                 border-top: 1px solid var(--border);
             }
 
-            /* 有選取時：左側讓出部分空間給右側 */
+            /* With a selection: the left side makes room for the right */
             .wiki-split-area.has-selection .wiki-left-pane {
-                flex: 0 0 40%;          /* 限制高度，保留空間給右側閱讀 */
+                flex: 0 0 40%;          /* Limit height to leave room for the detail pane */
                 max-height: 40%;
                 border-bottom: 1px solid var(--border);
                 overflow-y: auto;
             }
             .wiki-split-area.has-selection .wiki-right-pane {
-                display: flex;           /* 顯示右側 */
+                display: flex;           /* Show the right side */
                 flex-direction: column;
                 flex: 1 1 60%;
                 min-height: 0;
@@ -245,7 +245,7 @@ function _injectHelpStyles() {
             color: var(--text-muted,#666); font-size: 0.82em; font-style: italic;
         }
 
-        /* ── README / 完整說明 ── */
+        /* ── README / full documentation ── */
         .wiki-readme-area-wrap { flex: 1; min-height: 0; overflow: hidden; }
         .wiki-readme-layout { display: flex; flex-direction: row; height: 100%; width: 100%; overflow: hidden; position: relative; }
         .wiki-readme-area { flex: 1; min-width: 0; overflow-y: auto; }
@@ -672,7 +672,7 @@ function _buildActiveFiltersHTML(target) {
             + '<button class="chip-clear-all" onclick="_clearAllChips(\'machine\')">Clear All</button></div>';
     }
 
-    // target === 'item' (原本邏輯不變，僅按鈕改呼叫帶 'item')
+    // target === 'item' (same logic as before; the buttons now pass 'item')
     var LABELS = {
         tier: _tn('Tier', 'ui'), sell: _tn('Sell Price', 'ui'),
         wholesale: _tn('Wholesale Price', 'ui'), cauldronTarget: _tn('Cauldron Target', 'ui')
@@ -762,18 +762,18 @@ function _clearAllChips(target) {
 /* ─── ITEM DETAIL ─── */
 function wikiSelectItem(name) {
     if (name === _selectedItem) {
-        // 點擊相同項目 → 取消選取
+        // Clicking the selected item again deselects it
         _selectedItem = null;
-        // 移除所有高亮
+        // Remove all highlights
         document.querySelectorAll('#wiki-item-grid .wiki-tile').forEach(el => el.classList.remove('selected'));
-        // 清空右側詳細內容
+        // Clear the detail pane
         const pane = document.getElementById('wiki-right-pane');
         if (pane) pane.innerHTML = ''; 
-        // 更新版面狀態（窄螢幕下將隱藏右側）
+        // Update the layout (the right side hides on narrow screens)
         _updateLayoutState();
         return;
     }
-    // 正常選取流程
+    // Normal selection
     _selectedItem = name;
     document.querySelectorAll('#wiki-item-grid .wiki-tile').forEach(el => {
         el.classList.toggle('selected', el.dataset.name === name);
@@ -971,22 +971,22 @@ function _refreshMachineList() {
 }
 
 function wikiSelectMachine(name) {
-    // 【切換邏輯】如果點擊的是當前選取的機器 → 取消選取
+    // Toggle: clicking the selected machine again deselects it
     if (name === _selectedMachine) {
         _selectedMachine = null;
-        // 移除所有高亮樣式
+        // Remove all highlight styles
         document.querySelectorAll('#wiki-machine-grid .wiki-tile').forEach(function(el) {
             el.classList.remove('selected');
         });
-        // 清空右側詳細內容
+        // Clear the detail pane
         var pane = document.getElementById('wiki-right-pane');
         if (pane) pane.innerHTML = '';
-        // 更新版面狀態（窄螢幕下將收回右側面板）
+        // Update the layout (the right panel collapses on narrow screens)
         _updateLayoutState();
         return;
     }
 
-    // 【正常選取流程】
+    // Normal selection
     _selectedMachine = name;
     document.querySelectorAll('#wiki-machine-grid .wiki-tile').forEach(function(el) {
         el.classList.toggle('selected', el.dataset.name === name);
@@ -1061,17 +1061,17 @@ function _renderMachineDetail(machineName) {
         + '<div class="wiki-section"><div class="wiki-section-title">' + _tn('Production Recipes') + ' (' + recipes.length + ')</div>' + recipesHTML + '</div>';
 }
 
-/* ─── README / 完整說明 ─── */
-var _readmeCache = { en: null, zh: null };
+/* ─── README / full documentation ─── */
+var _readmeCache = { en: null };
 var _readmeScrollContainer = null;
 var _readmeScrollHandler = null;
 
 function _currentReadmeLang() {
-    return (window.ALCHEMY_I18N && window.ALCHEMY_I18N.enabled === false) ? 'en' : 'zh';
+    return 'en';
 }
 
 function _readmeUrlForLang(lang) {
-    return lang === 'zh' ? 'README.zh-CN.md' : 'README.md';
+    return 'README.md';
 }
 
 function _buildReadmeAreaHTML() {
@@ -1098,7 +1098,7 @@ function _loadReadmeView() {
         return;
     }
 
-    // 優先使用內嵌的 README 內容 (js/alchemy_readme.js)，這樣本地 file:// 開啟也能正常顯示
+    // Prefer the embedded README (js/alchemy_readme.js) so it also works when opened via file://
     var embedded = window.ALCHEMY_README && window.ALCHEMY_README[lang];
     if (embedded) {
         var result = _mdToHtml(embedded);
@@ -1107,7 +1107,7 @@ function _loadReadmeView() {
         return;
     }
 
-    // Fallback：內嵌內容不存在時才嘗試 fetch (例如未載入 alchemy_readme.js)
+    // Fallback: fetch only when the embedded copy is missing (e.g. alchemy_readme.js not loaded)
     contentEl.innerHTML = '<div class="md-loading">' + _tn('Loading...') + '</div>';
     fetch(_readmeUrlForLang(lang))
         .then(function(res) {
@@ -1129,7 +1129,7 @@ function _loadReadmeView() {
         });
 }
 
-/** 將轉換結果 {html, toc} 灌入內容區與側邊欄，並重新綁定 scroll-spy */
+/** Put the converted {html, toc} into the content area and sidebar, and rebind the scroll-spy */
 function _renderReadmeContent(result) {
     var contentEl = document.getElementById('wiki-readme-content');
     if (contentEl) contentEl.innerHTML = result.html;
@@ -1157,7 +1157,7 @@ function _onReadmeTocClick(e, id) {
         container.scrollTo({ top: target.offsetTop - 10, behavior: 'smooth' });
     }
     _setActiveTocLink(id);
-    _toggleReadmeTocDrawer(false); // 桌面版本呼叫此函式為 no-op (沒有 .open class 可移除)
+    _toggleReadmeTocDrawer(false); // A no-op on desktop (there is no .open class to remove)
 }
 
 function _setActiveTocLink(id) {
@@ -1166,7 +1166,7 @@ function _setActiveTocLink(id) {
     });
 }
 
-/** 用 scrollTop 與各標題 offsetTop 比對，滾動時高亮「目前捲動位置對應的最後一個標題」 */
+/** While scrolling, highlight the last heading above the scroll position (scrollTop vs heading offsetTop) */
 function _attachReadmeScrollSpy() {
     if (_readmeScrollContainer && _readmeScrollHandler) {
         _readmeScrollContainer.removeEventListener('scroll', _readmeScrollHandler);
@@ -1181,7 +1181,7 @@ function _attachReadmeScrollSpy() {
     var headings = Array.prototype.slice.call(content.querySelectorAll('h2[id], h3[id]'));
     if (headings.length === 0) return;
 
-    var TOC_SCROLL_BUFFER = 20; // 與 _onReadmeTocClick 的捲動偏移量 (-10) 搭配，避免剛好卡在邊界誤判
+    var TOC_SCROLL_BUFFER = 20; // Pairs with the -10 scroll offset in _onReadmeTocClick so a heading right at the edge is not missed
 
     function updateActive() {
         var scrollTop = container.scrollTop;
@@ -1199,10 +1199,10 @@ function _attachReadmeScrollSpy() {
     _readmeScrollContainer = container;
     _readmeScrollHandler = updateActive;
     container.addEventListener('scroll', _readmeScrollHandler, { passive: true });
-    updateActive(); // 立即計算一次初始狀態
+    updateActive(); // Compute the initial state right away
 }
 
-/** 手機版抽屜開關；force 為 true/false 時強制設定狀態，省略則切換目前狀態 */
+/** Mobile drawer toggle; force true/false sets the state, omitted toggles it */
 function _toggleReadmeTocDrawer(force) {
     var sidebar = document.getElementById('wiki-toc-sidebar');
     var overlay = document.getElementById('wiki-toc-overlay');
@@ -1246,7 +1246,7 @@ function _mdToHtml(md) {
     var lines = md.replace(/\r\n/g, '\n').split('\n');
     var html = [];
     var toc = [];
-    _readmeSlugCounts = {}; // 每次重新轉換都重置，避免跨語言/重載時 id 累加
+    _readmeSlugCounts = {}; // Reset on every conversion so ids do not keep counting up across reloads
     var i = 0;
     var inList = null; // 'ul' | 'ol' | null
     var inCode = false;

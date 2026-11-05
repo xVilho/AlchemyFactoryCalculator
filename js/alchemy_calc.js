@@ -109,11 +109,11 @@ function toggleCatalystExpand(catalystType) {
 }
 
 /**
- * 控制主生產鏈中所有可回收節點的狀態
- * @param {boolean} enable - true 為全部回收, false 為全部不回收
+ * Set the recycle state of every recyclable node in the main production chain
+ * @param {boolean} enable - true recycles all, false recycles none
  */
 function setAllRecycling(enable) {
-    // 尋找畫面上所有現有的「回收按鈕」，將其 pathKey 加入/移除 Set
+    // Find every recycle button on screen and add/remove its pathKey in the Set
     const buttons = document.querySelectorAll('.recycle-btn');
     buttons.forEach(btn => {
         const onclickAttr = btn.getAttribute('onclick');
@@ -122,7 +122,7 @@ function setAllRecycling(enable) {
             enable ? GLOBAL_CALC_STATE.activeRecyclers.add(match[1]) : GLOBAL_CALC_STATE.activeRecyclers.delete(match[1]);
         }
     });
-    calculate(); // 重新計算以套用變更
+    calculate(); // Recalculate to apply the change
 }
 
 function toggleFirstLevel() {
@@ -134,25 +134,25 @@ function toggleFirstLevel() {
     });
     if (level1Nodes.length === 0) return;
 
-    // 根據第一個符合項目的狀態決定「全部展開」或「全部摺疊」
+    // The first matching item decides whether to expand all or collapse all
     const isCurrentlyCollapsed = level1Nodes[0].classList.contains('collapsed');
     const shouldCollapse = !isCurrentlyCollapsed;
     level1Nodes.forEach(n => n.classList.toggle('collapsed', shouldCollapse));
 }
 
 /**
- * 批量切換標題下方節點的狀態
+ * Toggle all nodes under a section header
  */
 function toggleNodesInSection(headerElement, shouldCollapse) {
     let sectionContainer = headerElement.closest('div');
     let next = sectionContainer.nextElementSibling;
-    // 遍歷直到遇到下一個 section-header 或結束
+    // Walk until the next section-header or the end
     while (next && !next.classList.contains('section-header')) {
         if (next.classList.contains('node')) {
             const isCurrentlyCollapsed = next.classList.contains('collapsed');
             if (shouldCollapse !== isCurrentlyCollapsed) {
                 const arrow = next.querySelector('.tree-arrow');
-                if (arrow) arrow.click(); // 觸發現有的 toggleNode 邏輯以同步 GLOBAL_CALC_STATE
+                if (arrow) arrow.click(); // Trigger the existing toggleNode logic so GLOBAL_CALC_STATE stays in sync
             }
         }
         next = next.nextElementSibling;
@@ -162,14 +162,14 @@ function toggleNodesInSection(headerElement, shouldCollapse) {
 function jumpToNode(pathKey) {
     let target = document.querySelector(`[data-path="${pathKey}"]`);
     if (!target) {
-        // TODO: 展開折疊的父節點
+        // TODO: expand collapsed parent nodes
         return;
     }
 
-    // 捲動到目標節點
+    // Scroll to the target node
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // 高亮視覺反饋
+    // Highlight it as visual feedback
     const content = target.querySelector('.node-content');
     if (content) {
         content.classList.add('jump-highlight');
@@ -226,12 +226,12 @@ function sendCalcResultToPlanner() {
 }
 
 /**
- * 計算指定物品在單一機台滿載下的產出速率 (items/min)，
- * 已套用 Alchemy/Speed 倍率並被傳送帶速度上限裁切
+ * Output rate (items/min) of one fully loaded machine making the given item,
+ * with Alchemy/Speed multipliers applied and capped at belt speed
  * @param {string} recipe
  * @param {string} itemName
- * @param {object} [opts] 可選覆寫參數 { lvlAlchemy, lvlSpeed, lvlBelt, selectedFert }
- * @returns {number} ratePerMachine，若無配方則回傳 0
+ * @param {object} [opts] optional overrides { lvlAlchemy, lvlSpeed, lvlBelt, selectedFert }
+ * @returns {number} ratePerMachine, or 0 if there is no recipe
  */
 function getSingleMachineRate(recipe, itemName, opts = {}) {
     const itemDef = DB.items[itemName];
@@ -271,7 +271,7 @@ function gatherInputs() {
     let targetItem = "", targetRate = 0.0;
 
     if (!isMulti) {
-        // 單產物模式
+        // Single-target mode
         let rawInput = document.getElementById('targetItemInput').value.trim();
         targetItem = Object.keys(DB.items).find(k => k.toLowerCase() === rawInput.toLowerCase()) || rawInput;
         targetRate = parseFloat(document.getElementById('targetRate').value) || 0;
@@ -281,7 +281,7 @@ function gatherInputs() {
         });
     }
     else {
-        // 多產物模式：遍歷 DOM 中的每一列
+        // Multi-target mode: go through every row in the DOM
         document.querySelectorAll('.multi-target-row').forEach(row => {
             const item = row.dataset.item;
             const rate = parseFloat(row.querySelector('.multi-rate-input').value) || 0;
@@ -344,7 +344,7 @@ function gatherInputs() {
     return {
         targets,
         isMulti,
-        targetItem, targetRate, // 為了相容部分單產物邏輯
+        targetItem, targetRate, // Kept for single-target logic compatibility
         selectedFuel, selfFuel, fuelCost, showFuelCost,
         selectedHeatingDevice,
         selectedFert, selfFert, fertCost, showFertCost,
@@ -410,7 +410,7 @@ function renderCalculationResult(params, result) {
         params.selectedHeatingDevice
     );
 
-    // 新增：計算 fuel/fert 換算價值
+    // Compute the coin value of fuel/fert
     const fuelFertValues = solveFuelFertValue(params, result);
 
     updateSummaryBox(
@@ -1080,8 +1080,8 @@ ${t('Sum Volume')}: ${getMachineVolume(machineDef) * machineCount}
 }
 
 /**
- * 遞迴加總一棵生產樹中所有節點的 gold cost / fuel 消耗量 / fert 消耗量
- * (只取 costEntries 中 type==='gold' 的部分，避免混入 fuel/fert 的自訂單價)
+ * Recursively sum gold cost / fuel use / fert use over all nodes of a production tree
+ * (only costEntries with type==='gold', so custom fuel/fert prices aren't mixed in)
  */
 function sumResourceCosts(node, acc = { gold: 0, fuel: 0, fert: 0 }) {
     (node.tags.costEntries || []).forEach(entry => {
@@ -1094,10 +1094,10 @@ function sumResourceCosts(node, acc = { gold: 0, fuel: 0, fert: 0 }) {
 }
 
 /**
- * 當多目標模式下恰好有 2 個目標，且分別為 selectedFuel / selectedFert 時，
- * 解出 Fuel / Fert 相對於 Coin(=1) 的換算價值
- * 回傳 { fuelValue, fertValue } 或 null (條件不符) 
- * fuelValue/fertValue 為 null 代表無法求解 (det ≈ 0)
+ * When multi-target mode has exactly 2 targets, selectedFuel and selectedFert,
+ * solve for the value of Fuel / Fert relative to Coin (= 1)
+ * Returns { fuelValue, fertValue }, or null when the conditions are not met
+ * fuelValue/fertValue is null when unsolvable (det ≈ 0)
  */
 function solveFuelFertValue(params, result) {
     if (!params.isMulti || params.targets.length !== 2) return null;
@@ -1113,8 +1113,8 @@ function solveFuelFertValue(params, result) {
     const rootFert = result.treeRoots.find(entry => entry.target.item === fertItem);
     if (!rootFuel || !rootFert) return null;
 
-    const c1 = sumResourceCosts(rootFuel.root); // fuel 目標鏈的 x1,y1,z1
-    const c2 = sumResourceCosts(rootFert.root); // fert 目標鏈的 x2,y2,z2
+    const c1 = sumResourceCosts(rootFuel.root); // x1, y1, z1 of the fuel target chain
+    const c2 = sumResourceCosts(rootFert.root); // x2, y2, z2 of the fert target chain
 
     const w1 = rootFuel.target.rate;
     const w2 = rootFert.target.rate;

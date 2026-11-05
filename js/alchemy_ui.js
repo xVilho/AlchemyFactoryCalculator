@@ -7,10 +7,10 @@ let currentFocus = -1;
 // ITEM PICKER GLOBALS
 
 let currentPickerCategory = "[All]";
-let currentPickerTier = 0; // 0 = 不篩選
+let currentPickerTier = 0; // 0 = no filter
 let currentPickerProps = new Set(); // 'sellPrice' | 'wholesalePrice' | 'cauldronTarget'
-let _pickerOnClose = null;                    // picker 關閉時執行一次的清理回呼
-const DEFAULT_SELECT_ITEM = selectItem;       // 預設的 selectItem(function 宣告會被 hoist,這裡可直接取用)
+let _pickerOnClose = null;                    // Cleanup callback run once when the picker closes
+const DEFAULT_SELECT_ITEM = selectItem;       // The default selectItem (function declarations are hoisted, so it is available here)
 
 const PICKER_PROP_DEFS = [
     { key: 'sellPrice',      label: 'Sell Price' },
@@ -300,7 +300,7 @@ function toggleCalcMode() {
     document.getElementById('single-target-ui').style.display = isMulti ? 'none' : 'block';
     document.getElementById('multi-target-ui').style.display = isMulti ? 'block' : 'none';
     
-    // 如果進入多產物模式且清單為空，先嘗試載入儲存的列表，沒找到再預設加一列
+    // Entering multi-target mode with an empty list: load the saved list, or add one row if none
     const list = document.getElementById('multi-target-list');
     if (isMulti) {
         if (list.children.length === 0) loadMultiTargets();
@@ -334,7 +334,7 @@ function addMultiTargetRow(itemName, rate = 0) {
     `;
     
     container.appendChild(row);
-    _initDragHandle(row.querySelector('.drag-handle'), row); // ← 新增
+    _initDragHandle(row.querySelector('.drag-handle'), row); 
 }
 
 function _initDragHandle(handle, row) {
@@ -388,7 +388,7 @@ function pickMultiTargetRow(pickerEl) {
     const label = pickerEl.querySelector('.item-name-label');
     const img = pickerEl.querySelector('img');
     
-    // 暫時重寫全域 selectItem，以便 Picker 選中時更新這一個 Row
+    // Temporarily override the global selectItem so a pick updates this row
     const originalSelectItem = window.selectItem;
     window.selectItem = (name) => {
         const itemDef = DB.items[name] || { id: 0 };
@@ -396,7 +396,7 @@ function pickMultiTargetRow(pickerEl) {
         label.innerText = name;
         img.src = `img/item${itemDef.id}.png`;
         
-        window.selectItem = originalSelectItem; // 恢復原有的選擇邏輯
+        window.selectItem = originalSelectItem; // Restore the original selection logic
         calculate();
     };
     
@@ -428,24 +428,24 @@ function loadMultiTargets(e) {
         return;
     }
     const container = document.getElementById('multi-target-list');
-    container.innerHTML = ''; // 清空目前清單
+    container.innerHTML = ''; // Clear the current list
     DB.settings.multiTargets.forEach(target => {
         addMultiTargetRow(target.item, target.rate);
     });
-    calculate(); // 重新計算
+    calculate(); // Recalculate
     flashButton(e.currentTarget);
 }
 
 /**
- * 快速將多產物清單設為 [selectedFuel, selectedFert] 各一列，
- * 速率各自為「單一機台滿載」速率
+ * Quickly set the multi-target list to one row each of [selectedFuel, selectedFert],
+ * each at the rate of one fully loaded machine
  */
 function quickSetFuelFertTargets() {
     const fuelItem = document.getElementById('fuelSelect').value;
     const fertItem = document.getElementById('fertSelect').value;
     if (!fuelItem || !fertItem) return;
 
-    // 確保處於多產物模式
+    // Make sure multi-target mode is on
     const modeToggle = document.getElementById('modeToggle');
     if (!modeToggle.checked) {
         modeToggle.checked = true;
@@ -465,12 +465,12 @@ function quickSetFuelFertTargets() {
 }
 
 /**
- * 讓按鈕閃爍一下的輔助函數
+ * Helper that briefly flashes a button
  */
 function flashButton(el) {
     if (!el) return;
-    el.classList.remove('btn-flash'); // 重置動畫
-    void el.offsetWidth;             // 觸發重繪 (Reflow) 以重啟動畫
+    el.classList.remove('btn-flash'); // Reset the animation
+    void el.offsetWidth;             // Force a reflow to restart the animation
     el.classList.add('btn-flash');
     setTimeout(() => el.classList.remove('btn-flash'), 600);
 }
@@ -587,11 +587,11 @@ function adjustInput(id, delta) { const el = document.getElementById(id); let va
    SECTION: MODAL LOGIC
    ========================================================================== */
 
-// 防止「在 modal 內容區按下、拖到外面放開」誤觸發遮罩的關閉行為。
-// 瀏覽器會把 click 派發給 mousedown/mouseup 目標的共同祖先 (即 .modal-overlay)，
-// 導致 overlay 上的 inline onclick 被執行。
-// 做法：記錄 pointerdown 的起點，若 click 落在 overlay 本身但起點不是 overlay，
-// 就在 capture 階段攔截掉，讓 overlay 的 inline onclick 不會被呼叫。
+// Stop a press inside the modal content that is released outside from closing the overlay.
+// The browser sends the click to the common ancestor of the mousedown/mouseup targets (.modal-overlay),
+// which runs the inline onclick on the overlay.
+// Fix: remember where pointerdown started; if the click lands on the overlay but did not start there,
+// stop it in the capture phase so the overlay onclick never runs.
 let _modalPointerDownTarget = null;
 
 document.addEventListener('pointerdown', (e) => {
@@ -612,7 +612,7 @@ function closeModal(id) {
 }
 
 function _runPickerCleanup() {
-    window.selectItem = DEFAULT_SELECT_ITEM;  // 還原任何被 picker 呼叫者覆寫的 selectItem
+    window.selectItem = DEFAULT_SELECT_ITEM;  // Restore any selectItem a picker caller overrode
     const cb = _pickerOnClose;
     _pickerOnClose = null;
     if (cb) cb();
@@ -644,22 +644,22 @@ function openItemPicker() {
 
     const searchInput = document.getElementById('itemPickerSearch');
     if (searchInput) {
-        // 使用 requestAnimationFrame 確保瀏覽器完成 Modal 的渲染排版
+        // requestAnimationFrame so the browser has laid out the modal first
         requestAnimationFrame(() => {
             searchInput.focus();
             if (searchInput.value) {
-                searchInput.select(); // 若有文字，則自動全選
+                searchInput.select(); // Select any existing text
             }
         });
     }
 }
 
-// 渲染頂部的分類按鈕
+// Render the category buttons at the top
 function renderCategoryBar() {
     const bar = document.getElementById('picker-category-bar');
     bar.innerHTML = '';
     
-    // 獲取所有存在的分類
+    // Collect every category that exists
     const categories = new Set(["[All]"]);
     Object.values(DB.items).forEach(item => {
         if (item.category) categories.add(item.category);
@@ -671,8 +671,8 @@ function renderCategoryBar() {
         btn.innerText = t(cat, 'categories');
         btn.onclick = () => {
             currentPickerCategory = cat;
-            renderCategoryBar(); // 刷新按鈕狀態
-            renderItemPicker();  // 刷新列表
+            renderCategoryBar(); // Refresh button state
+            renderItemPicker();  // Refresh the list
         };
         bar.appendChild(btn);
     });
@@ -713,14 +713,14 @@ function togglePickerProp(key) {
     renderItemPicker();
 }
 
-// 渲染物品列表
+// Render the item list
 function renderItemPicker() {    
     const grid = document.getElementById('picker-items-grid');
     const filterText = document.getElementById('itemPickerSearch').value.toLowerCase();
     updatePickerSearchClear();
     grid.innerHTML = '';
 
-    // 將 DB.items 轉換為數組以保持順序（或按 ID 排序）
+    // Turn DB.items into an array to keep the order (or sort by ID)
     const itemsToShow = Object.entries(DB.items).filter(([name, data]) => {
         const matchesCategory = (data.category === currentPickerCategory
             || currentPickerCategory === "[All]"
@@ -748,7 +748,7 @@ function renderItemPicker() {
             card.innerHTML += `<span class="cand-cost" >${Number(data.cauldronCost.toFixed(2))}</span>`;
         }
         else if (isGeneralCatagory) {
-            // 根據分類獲取標籤顏色類名
+            // Tag color class for the category
             const tagClass = `tag-${data.category ? data.category.replace(/\s+/g, '') : 'Other'}`;
             const translatedCat = t(data.category || "Other", 'categories');
             card.innerHTML += `<span class="picker-item-tag ${tagClass}">${translatedCat}</span>`;
@@ -823,7 +823,7 @@ function _renderRecipeModalScopeBar() {
     const titleEl = document.getElementById('recipe-modal-title');
     titleEl.innerText = t('Select Recipe for ') + _recipeModalItem;
 
-    // 清除舊的 scope bar / cauldron 按鈕
+    // Remove the old scope bar / cauldron buttons
     document.getElementById('recipe-modal-scope-bar')?.remove();
     titleEl.querySelectorAll('.cauldron-shortcut-btn').forEach(b => b.remove());
 
@@ -837,7 +837,7 @@ function _renderRecipeModalScopeBar() {
         titleEl.appendChild(btn);
     }
 
-    // 只有在有 pathKey 時才顯示 scope 開關（無 pathKey = 沒有節點context，只能全局）
+    // Show the scope switch only with a pathKey (no pathKey = no node context, global only)
     if (!_recipeModalPathKey) return;
 
     const bar = document.createElement('div');
@@ -879,14 +879,14 @@ function _renderRecipeModalList() {
     const list = document.getElementById('recipe-list');
     list.innerHTML = '';
 
-    // 依 scope 決定「目前選中」的判斷依據
+    // What counts as currently selected depends on the scope
     const currentId = (getActiveRecipe(item, pathKey) || {}).id;
 
     candidates.forEach(r => {
         const div = document.createElement('div');
         div.className = `recipe-option ${r.id === currentId ? 'active' : ''}`;
 
-        // 寫入邏輯依 scope 分流
+        // Where to write depends on the scope
         const applyRecipe = () => {
             if (pathKey) {
                 if (_recipeModalScope === 'node') {
@@ -901,7 +901,7 @@ function _renderRecipeModalList() {
             calculate();
         };
 
-        // 自訂輸入配方 (Paradox Crucible 等)
+        // Custom-input recipes (Paradox Crucible etc.)
         if (r.customInputSlot) {
             const mod = DB.settings.recipeModifiers[r.id] || {};
             const selectedItem = mod.customInput;
@@ -1057,9 +1057,9 @@ function _renderRecipeModalList() {
 }
 
 /**
- * 開啟 Item Picker 讓玩家為「自訂輸入配方」選擇 input 物品
- * @param {string} recipeId  例如 "Oblivion Essence (Custom)"
- * @param {string} forItem   該配方所屬的產出物品，用於選完後重繪 recipe modal
+ * Open the Item Picker to choose the input item for a custom-input recipe
+ * @param {string} recipeId  e.g. "Oblivion Essence (Custom)"
+ * @param {string} forItem   the output item of the recipe, used to redraw the recipe modal afterwards
  */
 function pickCustomRecipeInput(recipeId, forItem) {
     const originalSelectItem = window.selectItem;
@@ -1071,7 +1071,7 @@ function pickCustomRecipeInput(recipeId, forItem) {
         window.selectItem = originalSelectItem;
         closeModal('picker-modal');
         calculate();
-        openRecipeModal(forItem); // 重新渲染 recipe modal 顯示新選擇
+        openRecipeModal(forItem); // Re-render the recipe modal with the new choice
     };
     openItemPicker();
 }
@@ -1331,7 +1331,7 @@ function renderCustomCostList(focusItem = null) {
         const itemDef = DB.items[name] || {};
         const cost = costs[name] || 0;
 
-        // 燃料/肥料比例文字，顯示在 item-name-label 右側
+        // Fuel/fertilizer ratio text, shown right of item-name-label
         let ratioText = '';
         if (itemDef.heat) {
             const perCost = cost > 0 ? (itemDef.heat * (1 + lvlFuel * 0.10) / cost) : 0;
@@ -1342,7 +1342,7 @@ function renderCustomCostList(focusItem = null) {
             ratioText += `<span class="details" style="color:var(--bio); white-space:nowrap; font-size:0.8em;">${perCost.toFixed(2)} V/${t('Coin')}</span>`;
         }
 
-        // details 區域一律顯示硬幣格式
+        // The details area always uses coin format
         const coinDisplay = `<span class="details" style="text-align:right;">${formatCoinIcons(cost)}</span>`;
 
         const highlight = name === focusItem ? 'border-color:var(--accent); background:#2e3d30;' : '';
@@ -1391,14 +1391,14 @@ function addCustomCostRow() {
    SECTION: SCALE MODAL
    ========================================================================== */
 
-// 暫存目前 modal 的基準數值（套用後更新）
+// Base values of the current modal (updated after apply)
 let _scaleModalBase = null;
 
 function openScaleModal(itemName, requestedRate, machineCount, ratePerMachine) {
     const itemDef = DB.items[itemName] || {};
     const beltSpeed = getBeltSpeed(parseInt(document.getElementById('lvlBelt').value) || 0);
 
-    // 基準數值
+    // Base values
     _scaleModalBase = {
         itemName,
         rate: requestedRate,
@@ -1407,15 +1407,15 @@ function openScaleModal(itemName, requestedRate, machineCount, ratePerMachine) {
         beltSpeed
     };
 
-    // 標題 icon + 名稱
+    // Title icon + name
     const iconId = itemDef.id ?? 0;
     document.getElementById('scale-modal-title').innerHTML = `${t('Adjust Ratio')} <img src="img/item${iconId}.png" width="24" height="24" style="vertical-align:middle;"> ${itemName}`;
 
-    // 填入左側舊值
+    // Fill in the old values on the left
     document.getElementById('scale-old-rate').innerText = Number(requestedRate.toFixed(4));
     document.getElementById('scale-old-belt').innerText = Number((requestedRate / beltSpeed).toFixed(4));
 
-    // 機器區域顯示/隱藏
+    // Show/hide the machine section
     const machineRow = document.getElementById('scale-machine-row');
     if (machineCount !== null && machineCount !== undefined && ratePerMachine !== null && ratePerMachine !== undefined && machineCount > 0) {
         machineRow.style.display = '';
@@ -1424,14 +1424,14 @@ function openScaleModal(itemName, requestedRate, machineCount, ratePerMachine) {
         machineRow.style.display = 'none';
     }
 
-    // 右側新值初始填入（等於舊值）
+    // New values on the right start equal to the old ones
     document.getElementById('scale-new-rate').value = Number(requestedRate.toFixed(4));
     document.getElementById('scale-new-belt').value = Number((requestedRate / beltSpeed).toFixed(4));
     if (machineCount !== null && machineCount !== undefined && machineCount > 0) {
         document.getElementById('scale-new-machine').value = Number(machineCount.toFixed(4));
     }
 
-    // 縮放比初始為 1
+    // Scale starts at 1
     document.getElementById('scale-ratio-display').innerText = '1.000';
     document.getElementById('scale-modal').style.display = 'flex';
 }
@@ -1453,7 +1453,7 @@ function onScaleInputChange(source) {
         ratio = baseRate > 0 ? (newMachine * ratePerMachine) / baseRate : 0;
     }
 
-    // 更新其他欄位
+    // Update the other fields
     if (source !== 'rate') {
         document.getElementById('scale-new-rate').value = Number((baseRate * ratio).toFixed(4));
     }
@@ -1477,20 +1477,20 @@ function applyScaleModal() {
     const isMulti = document.getElementById('modeToggle').checked;
 
     if (!isMulti) {
-        // 單目標模式
+        // Single-target mode
         const rateEl = document.getElementById('targetRate');
         const currentRate = parseFloat(rateEl.value) || 0;
         const newRate = currentRate * ratio;
         rateEl.value = newRate;
 
-        // 若目前是機器模式，要切換回 rate 模式才能寫入
+        // In machine mode, switch back to rate mode before writing
         const machineToggle = document.getElementById('machineModeToggle');
         if (machineToggle.checked) {
             machineToggle.checked = false;
             toggleControlMode(false);
         }
     } else {
-        // 多目標模式：對所有列等比縮放
+        // Multi-target mode: scale every row by the same factor
         document.querySelectorAll('.multi-target-row').forEach(row => {
             const input = row.querySelector('.multi-rate-input');
             if (input) {
@@ -1502,21 +1502,21 @@ function applyScaleModal() {
 
     calculate();
 
-    // 套用後更新基準值（讓使用者可繼續疊加）
+    // Update the base values after applying (so scaling can be stacked)
     const newBaseRate = _scaleModalBase.rate * ratio;
     _scaleModalBase.rate = newBaseRate;
     if (_scaleModalBase.machineCount !== null && _scaleModalBase.machineCount !== undefined) {
         _scaleModalBase.machineCount = _scaleModalBase.machineCount * ratio;
     }
 
-    // 更新左側舊值顯示
+    // Update the old values on the left
     document.getElementById('scale-old-rate').innerText = Number(newBaseRate.toFixed(4));
     document.getElementById('scale-old-belt').innerText = Number((newBaseRate / _scaleModalBase.beltSpeed).toFixed(4));
     if (_scaleModalBase.machineCount !== null && _scaleModalBase.machineCount !== undefined && _scaleModalBase.machineCount > 0) {
         document.getElementById('scale-old-machine').innerText = Number(_scaleModalBase.machineCount.toFixed(4));
     }
 
-    // 右側新值同步（縮放比歸 1）
+    // Sync the new values on the right (scale back to 1)
     document.getElementById('scale-new-rate').value = Number(newBaseRate.toFixed(4));
     document.getElementById('scale-new-belt').value = Number((newBaseRate / _scaleModalBase.beltSpeed).toFixed(4));
     if (_scaleModalBase.machineCount !== null && _scaleModalBase.machineCount !== undefined && _scaleModalBase.machineCount > 0) {

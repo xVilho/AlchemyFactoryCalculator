@@ -1,5 +1,3 @@
-[EN](README.md) | [简体中文](README.zh-CN.md)
-
 # Alchemy Factory Calculator
 
 A browser-based production planning tool for the game **Alchemy Factory**.
@@ -20,9 +18,8 @@ Precisely calculates raw material consumption, machine counts, heat/nutrient loa
 | 🗺️ **Planner** | Free-form node-graph editor for designing factory layouts, with modules, auto-layout, and live flow resolution |
 | ⚗️ **Cauldron Calculator** | Brute-force cauldron combination search with favorites and DB sync |
 | 📖 **Wiki** | Built-in item and machine database browser with recipe cross-references |
-| 🛠️ **Database Editor** | Edit recipes, items, and translations directly in the browser |
+| 🛠️ **Database Editor** | Edit recipes and items directly in the browser |
 | 💾 **Persistent Storage** | All settings, recipes, and lists auto-saved to browser `localStorage` |
-| 🌐 **Bilingual UI** | Toggle between English and Simplified Chinese; fully customizable translations |
 | 🔗 **Shareable URLs** | Current item and rate are reflected in the URL for easy sharing |
 
 ---
@@ -316,21 +313,12 @@ The table shows the item, units per contract, reward coin type, daily maximum, u
 
 Select a target from the dropdown:
 - **Database** — full item, machine, and recipe data
-- **Translations** — the `ALCHEMY_I18N` object controlling all UI strings and item/machine names
 - **Settings** — current user preferences as JSON
 - **(\*BACKUP)** variants — previous versions automatically saved before each apply
 
 Edit the JSON directly in the textarea, then click **Apply Changes** to reload immediately. Use **Export to File** to save a copy.
 
 > **Warning:** Applying a new Database reloads the page and overwrites the local copy. Keep backups via Export before applying.
-
----
-
-## 🌐 Language & Localization
-
-Click **🌐 EN/中文** in the header to toggle between English and Simplified Chinese.
-
-The translation layer (`alchemy_i18n.js`) maps every item name, machine name, category, and UI string. You can customize it in the **Database Editor → Translations**. Changes persist in `localStorage`.
 
 ---
 
@@ -343,7 +331,6 @@ The URL reflects the current state and can be bookmarked or shared:
 | `item` | Target item name | `?item=Steel%20Ingot` |
 | `rate` | Production rate (items/min) | `&rate=60` |
 | `tab` | Active tab on load | `&tab=cauldron` |
-| `lang` | Force language (`en` to force English) | `&lang=en` |
 | `fuel` | Override fuel source | `&fuel=Coke` |
 | `fert` | Override fertilizer source | `&fert=Basic%20Fertilizer` |
 | `setupgrades` | Comma-separated upgrade levels (indices 0–9) | `&setupgrades=5,0,3,2,1,1,0,0,0,0` |
@@ -357,7 +344,6 @@ The URL reflects the current state and can be bookmarked or shared:
 | Button | Effect |
 |---|---|
 | **Reset Recipes** | Clear the local database, restoring the bundled version (backup saved automatically) |
-| **Reset Translations** | Clear local translation overrides (backup saved automatically) |
 | **All Data Reset** | Clear all `localStorage` entries and reload with defaults |
 
 When the bundled database (`alchemy_db.js`) has a newer version than your local copy, an **update banner** appears at the top. You can choose to **Update Now** (overwrites local data but preserves your settings) or **Skip Update**.
@@ -372,7 +358,7 @@ AlchemyFactoryCalculator/
 ├── style.css                       # All styles (CSS custom properties, dark theme)
 ├── js/
 │   ├── alchemy_db.js              # Game data — items, machines, recipes
-│   ├── alchemy_i18n.js            # Translation table (EN/ZH) + t() helper
+│   ├── alchemy_text.js            # t() text helper (English only)
 │   ├── alchemy_state.js           # Global application state, default settings, persistence and localStorage
 │   ├── alchemy_main.js            # Application entry point, initialization, URL state, module coordination
 │   ├── alchemy_ui.js              # Shared UI logic: settings, combobox, item picker, slider, and modals
@@ -393,7 +379,6 @@ No build tools, bundlers, or external dependencies. Pure HTML + CSS + vanilla Ja
 
 - **Fork freely.** All data and logic are in plain text files.
 - To add a new item or recipe, edit `alchemy_db.js` (or use the Database Editor in the browser).
-- To add or fix a translation, edit `alchemy_i18n.js` or use Database Editor → Translations.
 - The calculation engine (`alchemy_calc_engine.js`) is fully decoupled from the UI and can be used independently.
 
 ---

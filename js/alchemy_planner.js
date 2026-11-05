@@ -7,13 +7,13 @@ const PLANNER_LIBRARY_KEY = "alchemy_planner_library_v1";
 const PLANNER_SETTINGS_KEY = "alchemy_planner_settings_v1";
 
 /**
- * plannerLibrary: 存放所有「方案(Plan)」的容器，會整包寫入 localStorage。
+ * plannerLibrary: container for all plans; written to localStorage as a whole.
  * {
  *   activePlanId: string,
- *   planOrder: string[],           // plan id 顯示順序 (下拉選單 / 管理清單皆依此排序)
+ *   planOrder: string[],           // plan id display order (the dropdown and manager list both use it)
  *   plans: { [planId]: { id, name, updatedAt, data } }
  * }
- * 其中每個 plan.data 的結構，就是原本單一 plannerState 的內容：
+ * Each plan.data has the structure of what used to be the single plannerState:
  * { nodes, edges, viewport, _edgeSeq, _nodeSeq, gridSize }
  */
 let plannerLibrary = {
@@ -22,7 +22,7 @@ let plannerLibrary = {
     plans: {}
 };
 
-// plannerState 永遠指向「目前作用中 plan」的 data 物件參照；
+// plannerState always references the data object of the active plan;
 let plannerState = null;
 
 /* ==========================================================================
@@ -34,44 +34,44 @@ let plannerState = null;
        nodes: {
            [nodeId]: {
                id: string,              // "pnode_<seq>"
-               kind: 'recipe' | 'module' | 'note' | 'portal', // 節點種類
-               recipeId: string | null,      // 一般節點: 對應 DB.recipes[recipeId].id
-               moduleId: string | null,      // 模塊節點: 指向 plannerLibrary.plans[moduleId]
-               recipeModifiers: object, // 選用，例如高級煉金爐催化劑設定 (從 DB.settings.recipeModifiers 複製快照)
-               machineCount: number,    // 該節點的機器台數，可為小數
-               x: number,               // 節點左上角在「圖座標系」(graph space) 中的位置
+               kind: 'recipe' | 'module' | 'note' | 'portal', // Node type
+               recipeId: string | null,      // Recipe node: matches DB.recipes[recipeId].id
+               moduleId: string | null,      // Module node: points to plannerLibrary.plans[moduleId]
+               recipeModifiers: object, // Optional, e.g. advanced machine catalyst settings (snapshot of DB.settings.recipeModifiers)
+               machineCount: number,    // Number of machines in this node, may be fractional
+               x: number,               // Top-left corner of the node in graph space
                y: number
            }
        },
        edges: {
            [edgeId]: {
                id: string,       // "pedge_<seq>"
-               item: string,     // 這條連線傳輸的物品名稱 (英文 key)
-               fromNode: string, // 來源節點 id (該物品從這裡的 output port 流出)
-               toNode: string,   // 目標節點 id (流入這裡的 input port)
-               createdAt: number // = plannerState._edgeSeq 建立當下的值，用來決定流量分配的優先順序
+               item: string,     // Item carried by this edge (English key)
+               fromNode: string, // Source node id (the item leaves through its output port)
+               toNode: string,   // Target node id (enters through its input port)
+               createdAt: number // Value of plannerState._edgeSeq at creation; decides flow allocation priority
            }
        },
-       _edgeSeq: number,  // 自增序號，用於產生 edgeId 與 createdAt 排序
-       _nodeSeq: number,  // 自增序號，用於產生 nodeId
+       _edgeSeq: number,  // Auto-increment counter for edgeIds and createdAt ordering
+       _nodeSeq: number,  // Auto-increment counter for nodeIds
        
    }
 
-   節點的「port」(輸入/輸出接點) 不是存在 node 物件裡的欄位，而是每次由
-   computeNodePorts(node) 依 node.recipeId + node.machineCount 即時算出：
+   A node's ports (input/output connection points) aren't stored on the node object; they're computed
+   on the fly by computeNodePorts(node) from node.recipeId + node.machineCount:
    { recipe, inputs: [{item, rate}], outputs: [{item, rate}], heatItemsPerMin, fertItemsPerMin }
 
-   note 節點另有 text/color/w/h；portal 節點另有 portalItem/machineCount。
-   node 沒有 width/height 欄位；卡片實際尺寸由 CSS 決定 (.planner-node 寬度固定200px，高度依 port 數量、是否有 heat/fert row 等內容而變動)，
-   需要時得從document.getElementById('planner-node-' + id) 讀取 offsetWidth/offsetHeight。
+   Note nodes also have text/color/w/h; portal nodes also have portalItem/machineCount.
+   Nodes have no width/height fields; the card size comes from CSS (.planner-node is 200px wide, height depends on the number of ports, heat/fert rows etc.),
+   so read offsetWidth/offsetHeight from document.getElementById('planner-node-' + id) when needed.
    
    ========================================================================== */
 
 
 /*
     Planner Settings (runtime state)
-    viewport: { x: number, y: number, zoom: number }, // canvas 平移/縮放狀態
-    gridSize: number   // 0 = 不吸附；否則為 snap 網格像素大小 (見 PLANNER_GRID_STEPS)    
+    viewport: { x: number, y: number, zoom: number }, // Canvas pan/zoom state
+    gridSize: number   // 0 = no snapping; otherwise the snap grid size in pixels (see PLANNER_GRID_STEPS)
 */
 
 let _plannerSettings = {
@@ -86,7 +86,7 @@ let _plannerSettings = {
         machines: true
     }
 };
-let _plannerLastFlows = null; // 上一次 resolveFlows() 的結果快取 (供拖曳節點時即時重繪邊線用)
+let _plannerLastFlows = null; // Cached result of the last resolveFlows() (for redrawing edges while dragging nodes)
 let _plannerCanvasHovered = false;
 let _plannerLinkMode = 'none';
 let _plannerSelectMode = false;
@@ -95,15 +95,15 @@ const PLANNER_ZOOM_MIN = 0.2;
 const PLANNER_ZOOM_MAX = 3;
 const PLANNER_GRID_STEPS = [40, 20, 0];
 
-/** 每個 plan 各自的 viewport 暫存 (僅存在於本次 session 記憶體中，不寫入 localStorage)。
- *  key: planId -> { x, y, zoom }。用來在切換 plan 時記得「上次離開這個 plan 時的視角」。 */
+/** Per-plan viewport cache (in memory for this session only, not written to localStorage).
+ *  key: planId -> { x, y, zoom }. Remembers where you left each plan when switching between plans. */
 let _plannerViewportCache = {};
 const _noteSaveTimers = new Map();
 
 /**
- * plannerHistory: 每個 plan 各自獨立的 undo/redo 堆疊，只存在記憶體中 (不寫入 localStorage)。
+ * plannerHistory: separate undo/redo stacks per plan, in memory only (not written to localStorage).
  * { [planId]: { stack: [ deep-cloned plan.data, ... ], index: number } }
- * index 指向 stack 中「目前所在」的快照；stack[0] 永遠是該 plan 在本次 session 被載入當下的初始狀態。
+ * index points to the current snapshot in stack; stack[0] is always the plan's state when first loaded this session.
  */
 let plannerHistory = {};
 const PLANNER_HISTORY_LIMIT = 10;
@@ -131,7 +131,7 @@ function initPlannerPage() {
     updatePlannerUndoRedoButtons();
 }
 
-// 讀取UI全局設定
+// Read the global UI settings
 function loadPlannerSettings() {
     try {
         const saved = JSON.parse(localStorage.getItem(PLANNER_SETTINGS_KEY) || '{}');
@@ -145,7 +145,7 @@ function loadPlannerSettings() {
         _plannerSettings.gridSize = saved.gridSize ?? 0;
         _plannerSettings.edgeStyle = saved.edgeStyle ?? 0;
 
-        // 读取摘要折叠状态
+        // Read the summary collapsed state
         _plannerSettings.summaryCollapsed = saved.summaryCollapsed ?? false;
         _plannerSettings.summarySectionCollapsed = {
             cost: saved.summarySectionCollapsed?.cost ?? false,
@@ -169,7 +169,7 @@ function loadPlannerSettings() {
     }    
 }
 
-// 寫入UI全局設定
+// Write the global UI settings
 function savePlannerSettings() {
     localStorage.setItem(
         PLANNER_SETTINGS_KEY,
@@ -177,18 +177,18 @@ function savePlannerSettings() {
     );
 }
 
-/** 建立一個全新、空白的 plan 資料本體 (即原本 plannerState 的初始值) */
+/** Create a brand-new, empty plan data object (the initial plannerState) */
 function _createEmptyPlanData() {
     return { nodes: {}, edges: {}, viewport: { x: 0, y: 0, zoom: 1 }, _edgeSeq: 0, _nodeSeq: 0, gridSize: 0 };
 }
 
-/** 建立一筆新的 plan 條目 (含 meta: id/name/updatedAt) */
+/** Create a new plan entry (with meta: id/name/updatedAt) */
 function _createPlan(name) {
     const id = 'plan_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
     return { id, name: name || t('New Plan', 'ui'), updatedAt: Date.now(), data: _createEmptyPlanData() };
 }
 
-/** 讀取整個 plan library；若無資料或損毀，建立一個預設空白方案 */
+/** Load the whole plan library; if missing or corrupt, create a default empty plan */
 function loadPlannerLibrary() {
     const saved = localStorage.getItem(PLANNER_LIBRARY_KEY);
     if (saved) {
@@ -211,26 +211,17 @@ function loadPlannerLibrary() {
         plannerLibrary.activePlanId = plannerLibrary.planOrder[0];
     }
 
-    // 遷移每個 plan 中，邊(edge)所記錄的物品名稱(中/英轉換)
+    // Fill in node kinds missing from older saves
     Object.values(plannerLibrary.plans).forEach(plan => {
         Object.values(plan.data.nodes || {}).forEach(node => {
             if (!node.kind) node.kind = node.moduleId ? 'module' : 'recipe';
-        });
-        Object.values(plan.data.edges || {}).forEach(edge => {
-            const itemName = edge.item;
-            if (!DB.items[itemName]) {
-                const alterName = queryDualItemName(itemName); // i18n
-                if (DB.items[alterName]) {
-                    edge.item = alterName;
-                }
-            }
         });
     });
 
     _activatePlanData(plannerLibrary.activePlanId);
 }
 
-/** 將 plannerState 指向指定 plan 的資料本體，並補齊缺漏欄位 */
+/** Point plannerState at the given plan's data and fill in missing fields */
 function _activatePlanData(planId) {
     const plan = plannerLibrary.plans[planId];
     if (!plan) return;
@@ -240,12 +231,12 @@ function _activatePlanData(planId) {
     _ensurePlannerHistory(planId);
 }
 
-/** 只保存 library 結構本身 (方案清單/順序/目前選中哪個)，不視為對內容的編輯 */
+/** Save only the library structure (plan list/order/selection); not counted as a content edit */
 function savePlannerLibraryMeta() {
     localStorage.setItem(PLANNER_LIBRARY_KEY, JSON.stringify(plannerLibrary));
 }
 
-/** 保存目前作用中 plan 的內容變更；同時更新其 updatedAt 時間戳記，並推進 undo 歷史堆疊 */
+/** Save content changes of the active plan; also updates its updatedAt and pushes the undo history */
 function savePlannerState() {
     const plan = plannerLibrary.plans[plannerLibrary.activePlanId];
     if (plan) plan.updatedAt = Date.now();
@@ -258,7 +249,7 @@ function savePlannerState() {
    SECTION: UNDO / REDO (per-plan, in-memory only)
    ========================================================================== */
 
-/** 若指定 plan 尚無歷史堆疊，以目前狀態建立一筆初始快照 (index 0) */
+/** If the plan has no history stack yet, create an initial snapshot (index 0) from its current state */
 function _ensurePlannerHistory(planId) {
     if (plannerHistory[planId]) return;
     plannerHistory[planId] = {
@@ -267,19 +258,19 @@ function _ensurePlannerHistory(planId) {
     };
 }
 
-/** 將目前 plannerState 的深拷貝推進歷史堆疊；若曾經 undo 過，先捨棄後面的 redo 分支 */
+/** Push a deep copy of plannerState onto the history stack; after an undo, drop the redo branch first */
 function _pushPlannerHistory(planId) {
     _ensurePlannerHistory(planId);
     const hist = plannerHistory[planId];
     hist.stack = hist.stack.slice(0, hist.index + 1);
     hist.stack.push(JSON.parse(JSON.stringify(plannerState)));
     if (hist.stack.length > PLANNER_HISTORY_LIMIT) {
-        hist.stack.shift(); // 超過上限 (10 筆)，捨棄最舊的一筆
+        hist.stack.shift(); // Over the limit (10), drop the oldest
     }
     hist.index = hist.stack.length - 1;
 }
 
-/** 依目前歷史堆疊位置，更新 toolbar 上 Undo/Redo 按鈕的 disabled 狀態 */
+/** Update the disabled state of the toolbar Undo/Redo buttons from the history position */
 function updatePlannerUndoRedoButtons() {
     const hist = plannerHistory[plannerLibrary.activePlanId];
     const undoBtn = document.getElementById('planner-undo-btn');
@@ -288,7 +279,7 @@ function updatePlannerUndoRedoButtons() {
     if (redoBtn) redoBtn.disabled = !hist || hist.index >= hist.stack.length - 1;
 }
 
-/** 將歷史堆疊中指定位置的快照還原為目前的 plan 資料，並重繪畫布 (不會再推進歷史) */
+/** Restore the snapshot at the given history position as the plan data and redraw (doesn't push history) */
 function _restorePlannerHistorySnapshot(planId, hist) {
     const snapshot = hist.stack[hist.index];
     const restored = JSON.parse(JSON.stringify(snapshot));
@@ -308,7 +299,7 @@ function _restorePlannerHistorySnapshot(planId, hist) {
     updatePlannerGridBackground();
     applyPlannerViewportTransform();
     updatePlannerUndoRedoButtons();
-    savePlannerLibraryMeta(); // 還原操作本身不算新的編輯，不推進歷史堆疊
+    savePlannerLibraryMeta(); // Restoring isn't a new edit, so don't push history
 }
 
 function plannerUndo() {
@@ -455,7 +446,7 @@ function attachPlannerCanvasPan() {
     canvas.dataset.panBound = "1";
 
     canvas.addEventListener('pointerdown', (e) => {
-         if (_plannerSelectMode) return; // 交給 box-select 處理
+         if (_plannerSelectMode) return; // Box-select handles it
         if (e.target.closest('.planner-node')) return;
         if (e.target.closest('.planner-edge-group')) return;
         if (e.target.closest('.planner-view-controls')) return;
@@ -488,7 +479,7 @@ function attachPlannerCanvasPan() {
             canvas.removeEventListener('pointerup', onUp);
             canvas.classList.remove('panning');
             savePlannerSettings();
-            if (moved < 3) clearPlannerSelection();   // 新增：純點擊 → 清空選取
+            if (moved < 3) clearPlannerSelection();   // A plain click clears the selection
         };
         canvas.addEventListener('pointermove', onMove);
         canvas.addEventListener('pointerup', onUp);        
@@ -801,7 +792,7 @@ function addPlannerNode(itemName, graphX, graphY, kind = 'recipe') {
         return;
     }
 
-    const recipe = getActiveRecipe(itemName); // 只在建立當下取一次，之後不再受 preferred 影響
+    const recipe = getActiveRecipe(itemName); // Only read once at creation; later preferred-recipe changes don't affect it
     if (!recipe) return;
 
     plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
@@ -868,7 +859,7 @@ function renderPlanner() {
     renderPlannerEmptyHint();
 }
 
-/** 輕量刷新：重算流量後只 patch 既有節點卡片內容與邊線，不重建節點 DOM (保留拖曳/輸入焦點狀態) */
+/** Light refresh: recompute flows, then patch existing node cards and edges without rebuilding node DOM (keeps drag/input focus) */
 function recomputeAndRefreshPlanner() {
     const flows = plannerResolveFlows();
     Object.values(plannerState.nodes).forEach(node => patchPlannerNodeDisplay(node, flows));
@@ -1061,7 +1052,7 @@ function onPlannerHeaderHover(headerEl, nodeId) {
     const node = plannerState.nodes[nodeId];
     if (!node) return;
     const rates = plannerGetNodeRates(node);
-    if (!rates || rates.errorCode) return; // 無 recipe 或已失效(循環/找不到 plan) 不顯示
+    if (!rates || rates.errorCode) return; // No recipe or invalid (circular / missing plan): don't show
     showPlannerRateTooltip(headerEl, rates);
 }
 
@@ -1196,9 +1187,9 @@ function plannerFillNodeBelts(nodeId) {
    ========================================================================== */
 
 /**
- * 依 node.portOrder（若存在）重新排序一組 port 清單。
- * portOrder 內找不到的 item 一律視為 Infinity，排到最後，
- * 並維持它們彼此原始的相對順序（stable sort）。
+ * Reorder a list of ports by node.portOrder (if present).
+ * Items not in portOrder count as Infinity and go last,
+ * keeping their original relative order (stable sort).
  * @param {{item:string, rate:number}[]} portList
  * @param {string[]|undefined} orderArr
  */
@@ -1208,12 +1199,12 @@ function applyPortOrder(portList, orderArr) {
     return [...portList].sort((a, b) => {
         const ia = indexMap.has(a.item) ? indexMap.get(a.item) : Infinity;
         const ib = indexMap.has(b.item) ? indexMap.get(b.item) : Infinity;
-        return ia - ib; // Array.sort 是 stable 的 (現代瀏覽器/V8 保證)，同分不動原順序
+        return ia - ib; // Array.sort is stable (guaranteed in modern browsers/V8), ties keep their order
     });
 }
 
 /**
- * 取陣列中位數 (輸入不需先排序)
+ * Median of an array (input doesn't need to be sorted)
  */
 function _plannerMedian(values) {
     if (values.length === 0) return null;
@@ -1223,13 +1214,13 @@ function _plannerMedian(values) {
 }
 
 /**
- * 對單一 port（item + dir）計算排序用的分數：
- * 取該 port 所有連線對方節點的「卡片中心 y」的中位數。
- * 未連線的 port 回傳 null（呼叫端會把這類 port 排到最後）。
+ * Sort score for one port (item + dir):
+ * the median card-center y of all nodes connected to that port.
+ * Unconnected ports return null (the caller puts them last).
  * @param {string} nodeId
  * @param {string} item
  * @param {'in'|'out'} dir
- * @param {object} flows  plannerResolveFlows() 的回傳值
+ * @param {object} flows  return value of plannerResolveFlows()
  */
 function _plannerPortSortScore(nodeId, item, dir, flows) {
     const key = plannerPortKey(nodeId, item, dir);
@@ -1250,9 +1241,9 @@ function _plannerPortSortScore(nodeId, item, dir, flows) {
 }
 
 /**
- * 依 _plannerPortSortScore 排序一組 port 清單，回傳排好的 item 名稱陣列。
- * 已連線的 port 依分數 (對方節點中心 y 的中位數) 由小到大排列；
- * 未連線的 port 一律排在最後，並維持原始相對順序。
+ * Sort a list of ports by _plannerPortSortScore and return the item names in order.
+ * Connected ports go by score (median center y of the connected nodes), smallest first;
+ * unconnected ports always go last, keeping their original relative order.
  * @param {{item:string, rate:number}[]} portList
  * @param {string} nodeId
  * @param {'in'|'out'} dir
@@ -1270,9 +1261,9 @@ function _plannerComputePortOrder(portList, nodeId, dir, flows) {
 }
 
 /**
- * 只調整單一節點的 port 順序 (input/output 各自重排)，
- * 依據目前連到它的邊，讓對方節點 y 座標盡量單調排列以減少視覺交叉。
- * 不影響其他節點的順序或位置。
+ * Reorder the ports of a single node only (inputs and outputs separately),
+ * so the connected nodes' y positions are as monotonic as possible, reducing crossings.
+ * Doesn't affect other nodes' order or position.
  * @param {string} nodeId
  */
 function plannerOptimizePortOrderForNode(nodeId) {
@@ -1293,8 +1284,8 @@ function plannerOptimizePortOrderForNode(nodeId) {
 }
 
 /**
- * 對目前 plan 中所有節點各自獨立跑一次單節點 port 排序 (單輪，不疊代收斂)。
- * 共用同一份 flows 快照，避免每個節點各自重新 resolve。
+ * Run the single-node port sort once for every node in the current plan (one pass, no iteration).
+ * All nodes share one flows snapshot instead of each resolving again.
  */
 function plannerOptimizeAllPortOrders() {
     const flows = plannerResolveFlows();
@@ -1322,7 +1313,7 @@ function updatePlannerMachineCount(nodeId, value) {
     savePlannerState();
 }
 
-/** 只 patch 單一節點卡片的顯示內容 (ports/機器數/heat-fert)，不重建 DOM，保留輸入焦點 */
+/** Patch only one node card's content (ports/machine count/heat-fert) without rebuilding DOM, keeping input focus */
 function patchPlannerNodeDisplay(node, flows) {
     if (node.kind === 'note') return;
     const ports = flows.nodePortsCache[node.id];
@@ -1398,7 +1389,7 @@ function onPlannerMachineCountBlur(nodeId, inputEl) {
     const newVal = node ? node.machineCount : parseFloat(inputEl.value);
     delete inputEl.dataset.oldVal;
 
-    if (!oldVal || !newVal || oldVal === newVal) return; // 舊值0/新值0/未變化 -> 不傳播
+    if (!oldVal || !newVal || oldVal === newVal) return; // Old 0 / new 0 / unchanged -> don't propagate
 
     const ratio = newVal / oldVal;
     propagatePlannerMachineRatio(nodeId, ratio);
@@ -1426,7 +1417,7 @@ function propagatePlannerMachineRatio(sourceNodeId, ratio) {
     flashPlannerLinkFeedback(sourceNodeId, connected);
 }
 
-/** 對符合 selector 的元素套用一次性 flash 動畫 (先移除再重新加上 class，觸發 reflow 重啟動畫) */
+/** Play a one-off flash animation on elements matching selector (remove and re-add the class, forcing a reflow) */
 function flashPlannerElements(selector, flashClass, duration = 500) {
     document.querySelectorAll(selector).forEach(el => {
         el.classList.remove(flashClass);
@@ -1504,7 +1495,7 @@ function attachPlannerNodeDrag(wrap, node) {
 }
 
 /* ==========================================================================
-   SECTION: EDGES - 繪製、拉線建立、刪除
+   SECTION: EDGES - drawing, connecting by dragging, deleting
    ========================================================================== */
 
 function getPlannerPortDotEl(nodeId, item, dir) {
@@ -1529,7 +1520,7 @@ function buildPlannerEdgePath(p1, p2, sign1 = 1, sign2 = -1) {
     const c1 = { x: p1.x + dx * sign1, y: p1.y };
     const c2 = { x: p2.x + dx * sign2, y: p2.y };
     const d = `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`;
-    // 三次貝茲曲線 t=0.5 的真實中點，供 label 定位使用
+    // True midpoint of the cubic Bezier at t = 0.5, used to position the label
     const mid = {
         x: p1.x * 0.125 + c1.x * 0.375 + c2.x * 0.375 + p2.x * 0.125,
         y: p1.y * 0.125 + c1.y * 0.375 + c2.y * 0.375 + p2.y * 0.125
@@ -1543,9 +1534,9 @@ function buildPlannerEdgePathD(p1, p2, sign1 = 1, sign2 = -1) {
 }
 
 /**
- * 沿三次貝茲曲線以固定弧長間距生成一串 ">" chevron 的 path d 字串。
- * @param {number} spacing 每個 chevron 中心之間的弧長間距 (px)
- * @param {number} size    chevron 尺寸 (縱深與垂直寬度皆為 size)
+ * Path d string for a row of ">" chevrons placed at fixed arc-length spacing along a cubic Bezier.
+ * @param {number} spacing arc-length spacing between chevron centers (px)
+ * @param {number} size    chevron size (depth and width are both size)
  */
 function _plannerBuildChevronPath(p1, c1, c2, p2, spacing = 9, size = 5) {
     const SAMPLES = 200;
@@ -1630,13 +1621,13 @@ function renderPlannerEdges(flows) {
         const itemDef = DB.items[edge.item] || {};
         const { d, mid, c1, c2 } = buildPlannerEdgePath(p1, p2, sign1, sign2);
 
-        // 依目前模式，產生對應的線條 path
+        // Build the line path for the current mode
         const linePathHtml = useChevron
             ? `<path class="planner-edge-chevrons" d="${_plannerBuildChevronPath(p1, c1, c2, p2, 9, 5)}"></path>`
             : `<path class="planner-edge-line" d="${d}"></path>`;
 
         const beltCount = !itemDef.liquid ? (flow / beltSpeed) : null;
-        // edge.color 現在放在 group 的 color 上，由 stroke: currentColor 吃色
+        // edge.color is now set as the group's color and picked up by stroke: currentColor
         const colorStyle = edge.color ? ` style="color:${edge.color};"` : '';
         const labelStyle = edge.color ? ` style="border-left:3px solid ${edge.color};"` : '';
         const beltArg = beltCount !== null ? beltCount : 'null';
@@ -1744,7 +1735,7 @@ function plannerInsertWaypointOnEdge(edgeId, graphX, graphY, save = true) {
     return wpId;
 }
 
-/* ---- 拉線互動 ---- */
+/* ---- Drag-to-connect interaction ---- */
 
 function attachPlannerPortDragHandlers() {
     const layer = document.getElementById('planner-nodes-layer');
@@ -1764,13 +1755,13 @@ function attachPlannerPortDragHandlers() {
 function startPlannerConnectionDrag(dotEl, e) {
     const nodeId = dotEl.closest('.planner-node').id.replace('planner-node-', '');
     const item = dotEl.dataset.item;
-    const dir = dotEl.dataset.dir; // 起點 port 的方向
+    const dir = dotEl.dataset.dir; // Direction of the starting port
     const svg = document.getElementById('planner-svg-layer');
     const startPos = getPlannerPortGraphPos(nodeId, item, dir) || plannerScreenToGraph(e.clientX, e.clientY);
 
     let previewEl = null;
     const updatePreview = (clientX, clientY) => {
-        // 若目前懸停在一個「方向相反、item相同」的合法 port 上，讓預覽線終點吸附到該 port 的 dot
+        // If hovering over a valid port (opposite direction, same item), snap the preview line end to that port's dot
         let endPos = plannerScreenToGraph(clientX, clientY);
         const hoverEl = document.elementFromPoint(clientX, clientY);
         const hoverRow = hoverEl ? hoverEl.closest('.planner-port') : null;
@@ -1817,7 +1808,7 @@ function startPlannerConnectionDrag(dotEl, e) {
         }
         const targetNodeEl = dropEl ? dropEl.closest('.planner-node') : null;
         if (!targetNodeEl) {
-            // 放到空白畫布 -> 開啟新增節點的配方選單
+            // Dropped on empty canvas -> open the recipe menu for a new node
             const g = plannerScreenToGraph(ev.clientX, ev.clientY);
             openPlannerRecipePickerMenu({
                 item, originDir: dir, sourceNodeId: nodeId,
@@ -1825,7 +1816,7 @@ function startPlannerConnectionDrag(dotEl, e) {
                 clientX: ev.clientX, clientY: ev.clientY
             });
         }
-        // 放到卡片上但不是 port row -> 取消，不做任何事
+        // Dropped on a card but not on a port row -> cancel, do nothing
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
@@ -1878,8 +1869,8 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
     let flows = plannerResolveFlows();
     renderPlanner();
 
-    // 從 sourceNode 的輸入端拉線連接時，若連上後 sourceNode 對此 item 仍然短缺，
-    // 自動提升 targetNode 的機器數以補足短缺量。
+    // When connecting from sourceNode's input and sourceNode is still short of this item afterwards,
+    // raise targetNode's machine count to cover the shortfall.
     if (sourceDir !== 'out') {
         const sourceInKey = plannerPortKey(sourceNodeId, item, 'in');
         const shortage = flows.portRemaining[sourceInKey] || 0;
@@ -1904,7 +1895,7 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
    SECTION: EMPTY CANVAS HINT (shown when the active plan has no nodes)
    ========================================================================== */
 
-/** 依目前語言，組出提示視窗的內容清單 [key組合文字, 說明文字] */
+/** Content of the help popup: [key combination, description] */
 function _plannerEmptyHintEntries() {
     return [
         [t('Right-click canvas / + Add Node', 'ui'), t('Add a new recipe node', 'ui')],
@@ -1922,7 +1913,7 @@ function _plannerEmptyHintEntries() {
     ];
 }
 
-/** 依目前 plan 是否為空，顯示或移除中央的操作提示 */
+/** Show or remove the central help hint depending on whether the current plan is empty */
 function renderPlannerEmptyHint() {
     const canvas = document.getElementById('planner-canvas');
     if (!canvas) return;

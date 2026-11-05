@@ -5,8 +5,6 @@ let DB = null;
 const STORAGE_KEY = "alchemy_factory_save_v1";
 const SOURCE_KEY = "alchemy_source_v1";
 const BACKUP_KEY = "alchemy_source_backup_v1";
-const I18N_DATA_KEY = "alchemy_i18n_source_v1";
-const I18N_BACKUP_KEY = "alchemy_i18n_source_backup_v1";
 const SETTINGS_KEY = "alchemy_settings_v1";
 const SETTINGS_BACKUP_KEY = "alchemy_settings_backup_v1";
 
@@ -77,9 +75,6 @@ const DEFAULT_SETTINGS = {
         ">Copper Coin": "Copper Coin",
         ">Silver Coin": "Silver Coin",
         ">Gold Coin": "Gold Coin",                
-        ">铜币": "Copper Coin",
-        ">银币": "Silver Coin",
-        ">金币": "Gold Coin",
     },
     recipeModifiers: {},
     activeRecyclers: {},
@@ -104,8 +99,6 @@ function loadEditorContent() {
     switch (target) {
         case 'db': editor.value = localStorage.getItem(SOURCE_KEY) ?? JSON.stringify(DB, null, 2); break;
         case 'db_backup': editor.value = localStorage.getItem(BACKUP_KEY) ?? ""; break;
-        case 'i18n': editor.value = JSON.stringify(window.ALCHEMY_I18N, null, 2); break;
-        case 'i18n_backup': editor.value = localStorage.getItem(I18N_BACKUP_KEY) ?? ""; break;
         case 'settings': editor.value = JSON.stringify(DB.settings, null, 2); break;
         case 'settings_backup': editor.value = localStorage.getItem(SETTINGS_BACKUP_KEY) ?? ""; break;
     }
@@ -130,14 +123,8 @@ function applyChanges() {
                 if (localStorage.getItem(SOURCE_KEY)) localStorage.setItem(BACKUP_KEY, localStorage.getItem(SOURCE_KEY));
                 localStorage.setItem(SOURCE_KEY, txt);
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
-                init();
-            case 'i18n':
-            case 'i18n_backup':                
-                translateDatabase(DB, false); // Revert DB item key back the the original key
-                window.ALCHEMY_I18N = parsedData;
-                if (localStorage.getItem(I18N_DATA_KEY)) localStorage.setItem(I18N_BACKUP_KEY, localStorage.getItem(I18N_DATA_KEY));
-                localStorage.setItem(I18N_DATA_KEY, JSON.stringify(window.ALCHEMY_I18N));
                 location.reload();
+                return;
             case 'settings':
             case 'settings_backup':
                 DB.settings = parsedData;
@@ -180,25 +167,13 @@ function resetRecips() {
     } 
 }
 
-function resetTranslations() {
-    if(confirm(t('Reset Translations', 'ui') + "?")) {
-        console.log("Reset Translations");
-        const localSourceI18NData = localStorage.getItem(I18N_DATA_KEY);
-        localStorage.removeItem(I18N_DATA_KEY);
-        if (localSourceI18NData) localStorage.setItem(I18N_BACKUP_KEY, localSourceI18NData);
-        location.reload();
-    } 
-}
-
 function resetAllData() {
     if(confirm(t('Reset All Database?', 'ui'))) {
         console.log("Reset All Database");
         const localSourceData = localStorage.getItem(SOURCE_KEY);
-        const localSourceI18NData = localStorage.getItem(I18N_DATA_KEY);
         const localSettingsData = localStorage.getItem(SETTINGS_KEY);
         localStorage.clear();
         if (localSourceData) localStorage.setItem(BACKUP_KEY, localSourceData);
-        if (localSourceI18NData) localStorage.setItem(I18N_BACKUP_KEY, localSourceI18NData);
         if (localSettingsData) localStorage.setItem(SETTINGS_BACKUP_KEY, localSettingsData);
         location.reload();
     } 

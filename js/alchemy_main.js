@@ -5,7 +5,6 @@ let isHandlingPopstate = false;
 function init() {
     const localData = localStorage.getItem(STORAGE_KEY);
     const urlParams = new URLSearchParams(window.location.search);
-    const urlLang = urlParams.get('lang');
     const urlTab = urlParams.get('tab');    
     const urlItem = urlParams.get('item');
     const urlRate = urlParams.get('rate');
@@ -30,8 +29,9 @@ function init() {
         console.log("Loading remote translation data...");
         window.ALCHEMY_I18N = JSON.parse(JSON.stringify(window.ALCHEMY_I18N));
     }
-    if (urlLang === 'en') window.ALCHEMY_I18N.enabled = false;
-    else ALCHEMY_I18N.enabled = true;
+    // English only: the Chinese mode is discontinued. Convert any data saved while it was on.
+    window.ALCHEMY_I18N.enabled = false;
+    migrateChineseSavedData();
 
     const fileDB = window.ALCHEMY_DB;
     if (localData) {
@@ -87,7 +87,7 @@ function init() {
     renderSlider(); // Initialize the slider logic
     
     if (urlItem) {
-        document.getElementById('targetItemInput').value = decodeURIComponent(urlItem);
+        document.getElementById('targetItemInput').value = englishItemName(decodeURIComponent(urlItem));
         updateComboIcon();
     }    
     if (urlRate) {
@@ -148,9 +148,7 @@ function init() {
     
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-        metaDesc.content = window.ALCHEMY_I18N.enabled ?
-            "游戏《炼金工厂》(Alchemy Factory) 1.0 的生产规划计算器。支持多目标生产树、炼金锅配方搜索、节点图编辑器，百科与数据库编辑。" :
-            "A production planning tool for the game Alchemy Factory 1.0 version. Supports cauldron recipes, multi-targets production trees, node graph editor, wiki, and database editing";
+        metaDesc.content = "A production planning tool for the game Alchemy Factory. Supports cauldron recipes, multi-target production trees, node graph planner, wiki, and database editing";
     }
 }
 
@@ -287,26 +285,6 @@ function translateText() {
     document.title = t("Alchemy Factory Calculator", "ui");
 }
 
-function toggleLanguage() {
-    if (window.ALCHEMY_I18N.enabled === undefined) window.ALCHEMY_I18N.enabled = true;
-    window.ALCHEMY_I18N.enabled = !window.ALCHEMY_I18N.enabled;
-    const url = new URL(window.location.href);
-    if (!window.ALCHEMY_I18N.enabled) url.searchParams.set('lang', 'en');
-    else url.searchParams.delete('lang');
-
-    // --- translate the 'item' param to match the new language ---
-    const itemParam = url.searchParams.get('item');
-    if (itemParam) {
-        url.searchParams.set('item', queryDualItemName(itemParam));
-    }
-    DB.settings.targetItem  = queryDualItemName(DB.settings.targetItem);
-    DB.settings.defaultFuel = queryDualItemName(DB.settings.defaultFuel);
-    DB.settings.defaultFert = queryDualItemName(DB.settings.defaultFert);
-    saveSettings();
-    
-    window.location.href = url.toString();
-}
-
 /* ==========================================================================
    SECTION: URL
    ========================================================================== */
@@ -351,9 +329,7 @@ function switchTab(tabName, updateUrl = true) {
 }
 
 function updateURL(tabName = '') {
-    const isEn = window.ALCHEMY_I18N.enabled === false;    
     const params = new URLSearchParams();
-    if (isEn) params.set('lang', 'en');
 
     if (tabName !== '' && tabName !== 'calc') {
         params.set('tab', tabName);        
@@ -390,3 +366,66 @@ window.addEventListener('popstate', function(event) {
 });
 
 window.onload = init;
+
+/* ==========================================================================
+   SECTION: Chinese-mode migration
+   The site used to default to Chinese, which stored translated item names in
+   settings, planner plans and cauldron data. Convert them back to English.
+   ========================================================================== */
+
+let _zhToEnMap = null;
+function _getZhToEnMap() {
+    if (_zhToEnMap) return _zhToEnMap;
+    _zhToEnMap = new Map();
+    const items = window.ALCHEMY_I18N?.items || {};
+    for (const en in items) {
+        const zh = items[en];
+        if (typeof zh === 'string' && zh && zh !== en) _zhToEnMap.set(zh, en);
+    }
+    return _zhToEnMap;
+}
+
+/** English item name for a possibly-Chinese name (unchanged if not a known Chinese name). */
+function englishItemName(name) {
+    return _getZhToEnMap().get(name) ?? name;
+}
+
+/** Recursively replace string values and object keys that exactly match a Chinese item name. */
+function _convertZhNames(value, map, stats) {
+    if (typeof value === 'string') {
+        const en = map.get(value);
+        if (en !== undefined) { stats.n++; return en; }
+        return value;
+    }
+    if (Array.isArray(value)) return value.map(v => _convertZhNames(v, map, stats));
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const k in value) {
+            const en = map.get(k);
+            if (en !== undefined) stats.n++;
+            out[en ?? k] = _convertZhNames(value[k], map, stats);
+        }
+        return out;
+    }
+    return value;
+}
+
+function migrateChineseSavedData() {
+    const map = _getZhToEnMap();
+    if (!map.size) return;
+    const keys = [SETTINGS_KEY, 'alchemy_planner_library_v1', 'alchemy_planner_settings_v1', 'alchemy_cauldron_v1'];
+    for (const key of keys) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw || !/[㐀-鿿]/.test(raw)) continue; // nothing Chinese in it
+            const stats = { n: 0 };
+            const converted = _convertZhNames(JSON.parse(raw), map, stats);
+            if (stats.n > 0) {
+                localStorage.setItem(key, JSON.stringify(converted));
+                console.log(`Converted ${stats.n} Chinese item names to English in ${key}`);
+            }
+        } catch (e) {
+            console.error('Chinese-name migration failed for ' + key, e);
+        }
+    }
+}

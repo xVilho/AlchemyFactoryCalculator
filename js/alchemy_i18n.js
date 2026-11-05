@@ -143,7 +143,7 @@ function translateDatabase(db, forward) {
 
 window.ALCHEMY_I18N = {    
     "version": 1,
-    "enabled": true,
+    "enabled": false,
     "ui": {
         // --- 0. Title ---
         "Alchemy Factory Calculator": "炼金工厂计算器",

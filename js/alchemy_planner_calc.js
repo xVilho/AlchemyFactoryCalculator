@@ -149,8 +149,10 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
 
     // 燃料消耗 (heatCost -> 燃料物品/分鐘, 每台機器)
     let heatItemsPerMachine = 0;
+    let needsHeat = false; // true for heated machines whether heat comes from fuel or Steam
     const machineDef = DB.machines[recipe.machine];
     if (machineDef && machineDef.heatCost) {
+        needsHeat = true;
         const heatingDeviceName = DB.settings.selectedHeatingDevice || "Stone Furnace";
         const heatingDevice = DB.machines[heatingDeviceName]?.isGenerator
             ? DB.machines[heatingDeviceName]
@@ -199,7 +201,7 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
         goldCostPerMachine = mainOutRate * unitPrice;
     }
 
-    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, fertItemsPerMachine, goldCostPerMachine, errorCode: '' };
+    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, needsHeat, fertItemsPerMachine, goldCostPerMachine, errorCode: '' };
 }
 
 /**
@@ -219,6 +221,7 @@ function computeNodePorts(node) {
     result.inputs = rates.inputsPerMachine.map(p => ({ item: p.item, rate: p.rate * mc }));
     result.outputs = rates.outputsPerMachine.map(p => ({ item: p.item, rate: p.rate * mc }));
     result.heatItemsPerMin = rates.heatItemsPerMachine * mc;
+    result.needsHeat = !!rates.needsHeat || result.heatItemsPerMin > 0;
     result.fertItemsPerMin = rates.fertItemsPerMachine * mc;
     result.goldCostPerMin = rates.goldCostPerMachine * mc;
     return result;

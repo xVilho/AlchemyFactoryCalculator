@@ -893,7 +893,7 @@ function createPlannerNodeEl(node, flows) {
     wrap.innerHTML = ``;
 
     if (node.recipeId) {
-        const heatTag = ports.heatItemsPerMin > 0 ? 'heat' : '';
+        const heatTag = (ports.needsHeat || ports.heatItemsPerMin > 0) ? 'heat' : '';
         const fertTag = ports.fertItemsPerMin > 0 ? 'fert' : '';
         const goldTag = ports.goldCostPerMin > 0 ? 'gold' : '';
         const machineKey = ports.recipe ? ports.recipe.machine : '';

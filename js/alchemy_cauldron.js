@@ -467,31 +467,60 @@ function populateCauldronCategories() {
     });
 }
 
+/** Reads a "max" number field; empty / invalid -> null (no limit). */
+function _readCandidateMax(id) {
+    const raw = (document.getElementById(id)?.value || '').trim();
+    if (raw === '') return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Whether an item passes the candidate pool's current view filters:
+ * category, search text, max point value (cauldronCost) and max coin value (estimated base cost).
+ * Items whose coin value can't be estimated are hidden while a coin limit is set.
+ * Select All / Deselect All / Only These act on exactly this set.
+ */
+function candidateMatchesView(name) {
+    const item = DB.items[name];
+    if (!item || !isVaildCandidate(name)) return false;
+
+    const catOk = (cauldronCatFilter === "[All]") ||
+                  (cauldronCatFilter === "[Include]" && cauldronCandidates.has(name)) ||
+                  (cauldronCatFilter === "[Exclude]" && !cauldronCandidates.has(name)) ||
+                  (cauldronCatFilter === "[Product]" && item.cauldronTarget) ||
+                  (item.category === cauldronCatFilter);
+    if (!catOk) return false;
+
+    const searchText = (document.getElementById('cauldron-cand-search')?.value || '').trim().toLowerCase();
+    if (searchText) {
+        const altName = (typeof queryDualItemName === 'function' ? queryDualItemName(name) : '') || '';
+        if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return false;
+    }
+
+    const maxPoints = _readCandidateMax('cauldron-cand-max-points');
+    if (maxPoints !== null && (item.cauldronCost || 0) > maxPoints) return false;
+
+    const maxCoins = _readCandidateMax('cauldron-cand-max-coins');
+    if (maxCoins !== null) {
+        const coins = getItemBaseCost(name);
+        if (coins === null || coins > maxCoins) return false;
+    }
+    return true;
+}
+
 function renderCandidatePool() {
     cauldronCatFilter = document.getElementById('cauldron-cat-select').value;
     const sortFlag = document.getElementById('cauldron-sort-by-cost').checked;
     const cauldronSortDescending = document.getElementById('cauldron-sort-order-btn').innerText === '🔽';
     const container = document.getElementById('candidate-pool');
     container.innerHTML = '';
-    const searchText = (document.getElementById('cauldron-cand-search')?.value || '').trim().toLowerCase();
 
     let array = [];
     Object.keys(DB.items).forEach(name => {
+        if (!candidateMatchesView(name)) return;
         const item = DB.items[name];
-        if (!isVaildCandidate(name)) return;
-
-        const isVisible = (cauldronCatFilter === "[All]") || 
-                          (cauldronCatFilter === "[Include]" && cauldronCandidates.has(name)) ||
-                          (cauldronCatFilter === "[Exclude]" && !cauldronCandidates.has(name)) ||
-                          (cauldronCatFilter === "[Product]" && item.cauldronTarget) ||
-                          (item.category === cauldronCatFilter);
-
-        if (!isVisible) return;
-        if (searchText) {
-            const altName = (typeof queryDualItemName === 'function' ? queryDualItemName(name) : '') || '';
-            if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return;
-        }
-        array.push({name: name, cost:item.cauldronCost||0, target:item.cauldronTarget||0, id:item.id||0});
+        array.push({name: name, cost:item.cauldronCost||0, target:item.cauldronTarget||0, id:item.id||0, coins:getItemBaseCost(name)});
     });
 
     if (sortFlag) array.sort((a, b) => (cauldronSortDescending ? (b.cost - a.cost) : (a.cost - b.cost)));
@@ -499,6 +528,7 @@ function renderCandidatePool() {
     array.forEach((item) => {
         const div = document.createElement('div');
         div.className = 'candidate-item';
+        div.title = item.coins !== null ? `${t('Coin value')}: ≈${formatVal(item.coins)}` : '';
         const isChecked = cauldronCandidates.has(item.name) ? 'checked' : '';
         div.innerHTML = `
             <input type="checkbox" ${isChecked} onchange="toggleCandidate('${item.name}')">
@@ -586,27 +616,17 @@ function toggleCandidate(name) {
     runCauldronSimulation();
 }
 
+/** check: true = select all visible, false = deselect all visible, 'only' = select exactly the visible ones. */
 function bulkToggleCandidates(check) {
-    const searchText = (document.getElementById('cauldron-cand-search')?.value || '').trim().toLowerCase();
-    Object.keys(DB.items).forEach(name => {
-        const item = DB.items[name];
-        if (!isVaildCandidate(name)) return;
-        if (searchText) {
-            const altName = (typeof queryDualItemName === 'function' ? queryDualItemName(name) : '') || '';
-            if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return;
-        }
-
-        const isMatch = (cauldronCatFilter === "[All]") || 
-                        (cauldronCatFilter === "[Include]" && cauldronCandidates.has(name)) ||
-                        (cauldronCatFilter === "[Exclude]" && !cauldronCandidates.has(name)) ||
-                        (cauldronCatFilter === "[Product]" && item.cauldronTarget) ||
-                        (item.category === cauldronCatFilter);
-
-        if (isMatch) {
+    const matches = Object.keys(DB.items).filter(candidateMatchesView);
+    if (check === 'only') {
+        cauldronCandidates = new Set(matches);
+    } else {
+        matches.forEach(name => {
             if (check) cauldronCandidates.add(name);
             else cauldronCandidates.delete(name);
-        }
-    });
+        });
+    }
     renderCandidatePool();
     populateCauldronCategories();
     document.getElementById('cauldron-cat-select').value = cauldronCatFilter;

@@ -573,9 +573,14 @@
                         <label for="cauldron-cat-select">Filter Category</label>
                         <select id="cauldron-cat-select" onchange="renderCandidatePool()"></select>
                     </div>
+                    <div class="cauldron-cand-max-row">
+                        <input type="number" id="cauldron-cand-max-points" class="cauldron-cand-search" min="0" placeholder="Max points" title="Only show items with a cauldron point value at or below this" oninput="renderCandidatePool()">
+                        <input type="number" id="cauldron-cand-max-coins" class="cauldron-cand-search" min="0" placeholder="Max coins" title="Only show items with an estimated coin value at or below this (items with unknown value are hidden)" oninput="renderCandidatePool()">
+                    </div>
                     <div class="split-btn-container">
-                        <button class="split-btn" onclick="bulkToggleCandidates(true)">Select All</button>
-                        <button class="split-btn" onclick="bulkToggleCandidates(false)">Deselect All</button>
+                        <button class="split-btn" onclick="bulkToggleCandidates(true)" title="Check every item in the list below">Select All</button>
+                        <button class="split-btn" onclick="bulkToggleCandidates(false)" title="Uncheck every item in the list below">Deselect All</button>
+                        <button class="split-btn" onclick="bulkToggleCandidates('only')" title="Check exactly the items in the list below and uncheck everything else">Only These</button>
                     </div>
                     <div class="checkbox-row" style="margin-top:10px;">
                         <input type="checkbox" id="cauldron-sort-by-cost" checked onchange="renderCandidatePool()">

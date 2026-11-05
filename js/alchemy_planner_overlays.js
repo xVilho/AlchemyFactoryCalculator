@@ -401,7 +401,8 @@ function renderPlannerNodeModalBody(nodeId) {
 
     const titleEl = document.getElementById('planner-node-modal-title');
     if (titleEl) {
-        titleEl.innerText = t('Node Settings', 'ui') + (mainOut ? ' — ' + mainOut : '');
+        const label = mainOut || ((node.kind === 'portal' && node.portalItem) ? '🌀 ' + node.portalItem : '');
+        titleEl.innerText = t('Node Settings', 'ui') + (label ? ' — ' + label : '');
     }
     
     const recipeSectionHtml = rawRecipe ?
@@ -1155,11 +1156,11 @@ function buildPlannerRateTooltipHtml(rates) {
         html += rates.outputsPerMachine.map(p => rowHtml(p.item, p.rate, '#00e676')).join('');
     }
     if (html) html += `<div class="planner-rate-tooltip-divider"></div>`;
-    if (rates.heatItemsPerMachine > 0.0001) {        
-        html += rowHtml(DB.settings.defaultFuel, -rates.heatItemsPerMachine, '#ff5722');
-    }
+    Object.entries(rates.heatByItem || {}).forEach(([fuelName, r]) => {
+        if (r > 0.0001) html += rowHtml('🔥 ' + fuelName, -r, '#ff5722');
+    });
     if (rates.fertItemsPerMachine > 0.0001) {
-        html += rowHtml(DB.settings.defaultFert, -rates.fertItemsPerMachine, '#76ff03');
+        html += rowHtml(plannerEnergy().fert, -rates.fertItemsPerMachine, '#76ff03');
     }
     if (rates.goldCostPerMachine > 0.0001) {
         html += `<div class="planner-rate-tooltip-row">
@@ -1342,10 +1343,19 @@ function togglePlannerSummarySection(key) {
     savePlannerSettings();
 }
 
+/** Coin value of one item, same rule as the Calculator's heating cost: custom cost, else buy price, else base cost */
+function plannerItemUnitPrice(item) {
+    const custom = DB.settings.customCosts?.[item];
+    if (typeof custom === 'number' && custom > 0) return custom;
+    const def = DB.items[item] || {};
+    return def.buyPrice || def.baseCost || 0;
+}
+
 /** Summary from flows: money/fuel/fertilizer use, machine counts, output surplus, input shortfall */
 function computePlannerSummaryStats(flows) {
     const machineCounts = {};
     let heatTotal = 0, fertTotal = 0, goldTotal = 0, steamTotal = 0;
+    const heatByItem = {};
 
     Object.values(plannerState.nodes).forEach(node => {
         const ports = flows.nodePortsCache[node.id];
@@ -1355,6 +1365,7 @@ function computePlannerSummaryStats(flows) {
             machineCounts[ports.recipe.machine] = (machineCounts[ports.recipe.machine] || 0) + count;
         }
         heatTotal += ports.heatItemsPerMin || 0;
+        Object.entries(ports.heatByItem || {}).forEach(([item, r]) => { heatByItem[item] = (heatByItem[item] || 0) + r; });
         fertTotal += ports.fertItemsPerMin || 0;
         goldTotal += ports.goldCostPerMin || 0;
         if (node.kind !== 'waypoint' && node.kind !== 'portal') {
@@ -1379,7 +1390,7 @@ function computePlannerSummaryStats(flows) {
         if (def && def.buyPrice) goldTotal += def.buyPrice * qty;
     });
 
-    return { machineCounts, heatTotal, fertTotal, steamTotal, outputSurplus, inputShortage, goldTotal };
+    return { machineCounts, heatTotal, heatByItem, fertTotal, steamTotal, outputSurplus, inputShortage, goldTotal };
 }
 
 function renderPlannerSummary(flows) {
@@ -1414,20 +1425,41 @@ function renderPlannerSummary(flows) {
     if (stats.goldTotal > 0.0001) {
         costRows += `<div class="planner-summary-row"><img src="img/copper.png" class="item-icon-small"><span>${t('Coin', 'ui')}</span><span class="planner-summary-val" style="color:var(--gold);">${Math.ceil(stats.goldTotal).toLocaleString()}/m</span></div>`;
     }
-    if (stats.heatTotal > 0.0001) {
-        const fuelDef = DB.items[DB.settings.defaultFuel] || {};
-        costRows += `<div class="planner-summary-row"><img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"><span>${DB.settings.defaultFuel}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(stats.heatTotal)}/m</span></div>`;
+    if (stats.fertTotal > 0.0001) {
+        const fertName = plannerEnergy().fert;
+        const fertDef = DB.items[fertName] || {};
+        costRows += `<div class="planner-summary-row"><img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small"><span>${fertName}</span><span class="planner-summary-val" style="color:var(--bio);">${formatVal(stats.fertTotal)}/m</span></div>`;
     }
+    if (!costRows) costRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
+
+    // --- Heating: fuel burned (materials) + its coin value ---
+    const heatEntries = Object.entries(stats.heatByItem).filter(([, r]) => r > 0.0001).sort((a, b) => b[1] - a[1]);
+    let heatRows = '', heatCoins = 0, heatCoinsKnown = true;
+    heatEntries.forEach(([item, rate]) => {
+        const def = DB.items[item] || {};
+        const price = plannerItemUnitPrice(item);
+        if (price > 0) heatCoins += rate * price; else heatCoinsKnown = false;
+        heatRows += `<div class="planner-summary-row" title="${price > 0 ? `${formatVal(price)} coins each` : 'No coin value known'}"><img src="img/item${def.id ?? 0}.png" class="item-icon-small"><span>${item}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(rate)}/m</span></div>`;
+    });
     if (stats.steamTotal > 0.0001) {
         // Steam Boiler (High): 300 Steam / 2s base -> 9000 Steam/min per boiler at speed x1
         const boilers = stats.steamTotal / (9000 * getSpeedMult(DB.settings.lvlSpeed || 0));
-        costRows += `<div class="planner-summary-row" title="${t('Total Steam consumed by heated machines', 'ui')}"><img src="img/item9002.png" class="item-icon-small"><span>${t('Steam')}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(stats.steamTotal)}/m <span style="color:var(--warn); font-weight:normal;">(≈${boilers.toFixed(2)} ${t('Steam Boiler', 'machines')})</span></span></div>`;
+        heatRows += `<div class="planner-summary-row" title="${t('Total Steam consumed by heated machines', 'ui')}"><img src="img/item9002.png" class="item-icon-small"><span>${t('Steam')}</span><span class="planner-summary-val" style="color:var(--fuel);">${formatVal(stats.steamTotal)}/m <span style="color:var(--warn); font-weight:normal;">(≈${boilers.toFixed(2)} ${t('Steam Boiler', 'machines')})</span></span></div>`;
+        // Steam not supplied inside this plan: value it as the plan's fuel burned in boilers
+        const steamShort = stats.inputShortage['Steam'] || 0;
+        if (steamShort > 0.0001) {
+            const fuelName = plannerEnergy().fuel;
+            const fuelHeat = (DB.items[fuelName]?.heat || 0) * (1 + (DB.settings.lvlFuel || 0) * 0.10);
+            const price = plannerItemUnitPrice(fuelName);
+            if (fuelHeat > 0 && price > 0) heatCoins += steamShort * PLANNER_STEAM_HEAT_VALUE / fuelHeat * price;
+            else heatCoinsKnown = false;
+        }
     }
-    if (stats.fertTotal > 0.0001) {
-        const fertDef = DB.items[DB.settings.defaultFert] || {};
-        costRows += `<div class="planner-summary-row"><img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small"><span>${DB.settings.defaultFert}</span><span class="planner-summary-val" style="color:var(--bio);">${formatVal(stats.fertTotal)}/m</span></div>`;
+    if (heatRows) {
+        heatRows += `<div class="planner-summary-row" title="Coin value of the fuel burned for heating per minute (unsupplied Steam valued as ${plannerEnergy().fuel} burned in Steam Boilers)${heatCoinsKnown ? '' : '. Some fuel has no known coin value.'}"><img src="img/copper.png" class="item-icon-small"><span>${t('Coin', 'ui')}${heatCoinsKnown ? '' : ' (partial)'}</span><span class="planner-summary-val" style="color:var(--gold);">≈${Math.ceil(heatCoins).toLocaleString()}/m</span></div>`;
+    } else {
+        heatRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
     }
-    if (!costRows) costRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
 
     // --- Section 2: Machines ---
     const machineEntries = Object.entries(stats.machineCounts).sort((a, b) => b[1] - a[1]);
@@ -1459,6 +1491,7 @@ function renderPlannerSummary(flows) {
         </div>
         <div class="planner-summary-body">
             ${sectionHtml('cost', t('Total Load', 'ui'), costRows)}
+            ${sectionHtml('heating', '🔥 ' + t('Cost of Heating', 'ui'), heatRows)}
             ${sectionHtml('output', t('Output', 'ui'), outputRows, outputEntries.length)}
             ${sectionHtml('input', t('Input', 'ui'), inputRows, inputEntries.length)}            
             ${sectionHtml('machines', t('Machines', 'ui'), machineRows, machineEntries.reduce((s, [, c]) => s + c, 0))}
@@ -1511,108 +1544,106 @@ function createPlannerWaypointFromPicker(ctx, kind = 'waypoint', machineCount = 
     savePlannerState();
 }
 
+/**
+ * Balance every recipe/module node upstream of targetId so it makes exactly what its consumers need.
+ * targetId, portals and nodes outside the upstream set keep their machine count (they are the fixed demand/supply).
+ *
+ * Handles loops (a node feeding itself, e.g. Coke fuelling the crucible that makes it, or longer cycles):
+ * fixed-point iteration  x_i = max over outputs p of (demand on p / output rate per machine),
+ * with demand taken from the consumers' current counts. Starting from 0 it converges to the smallest
+ * self-consistent solution; a loop that consumes more than it produces never settles and is reported.
+ *
+ * Several suppliers of one consumer port split its need evenly, after subtracting what fixed suppliers
+ * (portals, the target) already deliver. Waypoint chains are followed through to the real nodes.
+ * Returns { ok } and writes machineCount only when ok.
+ */
 function _calculateNodeDemand(targetId) {
-    const upstreamIds = [...getPlannerUpstreamNodeIds(targetId)];
-    const nodeDemand = {}; // nodeId -> item -> demand
-    upstreamIds.forEach(id => nodeDemand[id] = {});
-
-    // 1. ADD DEMAND FROM EXTERNAL CONSUMERS
-    // If a node in upstreamIds supplies a node NOT in upstreamIds, we must include that external demand!
-    Object.values(plannerState.edges).forEach(e => {
-        if (upstreamIds.includes(e.fromNode) && !upstreamIds.includes(e.toNode)) {
-            const externalNode = plannerState.nodes[e.toNode];
-            const rates = plannerGetNodeRates(externalNode);
-            if (rates) {
-                const p = rates.inputsPerMachine.find(p => p.item === e.item);
-                if (p) {
-                    const numSuppliers = Object.values(plannerState.edges).filter(edge => edge.toNode === e.toNode && edge.item === e.item).length;
-                    const demand = (p.rate * externalNode.machineCount) / (numSuppliers || 1);
-                    nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + demand;
-                }
-            }
-        }
+    const nodes = plannerState.nodes;
+    const edges = Object.values(plannerState.edges);
+    const isWp = id => nodes[id]?.kind === 'waypoint';
+    const upstream = getPlannerUpstreamNodeIds(targetId);
+    const vars = [...upstream].filter(id => {
+        const n = nodes[id];
+        return id !== targetId && n && (n.kind === 'recipe' || n.kind === 'module' || !n.kind);
     });
+    if (!vars.length) return { ok: true };
+    const varSet = new Set(vars);
 
-    // 2. Compute reverse graph edges for topological sort
-    const consumersOf = {};
-    upstreamIds.forEach(id => consumersOf[id] = []);
-    Object.values(plannerState.edges).forEach(e => {
-        if (upstreamIds.includes(e.fromNode) && upstreamIds.includes(e.toNode)) {
-            consumersOf[e.fromNode].push({ toNode: e.toNode, item: e.item });
-        }
-    });
+    const ratesCache = {};
+    const rates = id => (id in ratesCache) ? ratesCache[id] : (ratesCache[id] = nodes[id] ? plannerGetNodeRates(nodes[id]) : null);
+    const perMachine = (id, item, dir) => {
+        const r = rates(id);
+        if (!r || r.errorCode) return 0;
+        return ((dir === 'in' ? r.inputsPerMachine : r.outputsPerMachine).find(p => p.item === item) || {}).rate || 0;
+    };
 
-    // Kahn's algorithm for topological sort (reverse)
-    const inDegree = {};
-    upstreamIds.forEach(id => inDegree[id] = 0);
-    upstreamIds.forEach(id => {
-        consumersOf[id].forEach(c => inDegree[id]++);
-    });
-
-    const queue = [];
-    upstreamIds.forEach(id => { if (inDegree[id] === 0) queue.push(id); });
-
-    // Ensure targetId is the root consumer
-    const targetNode = plannerState.nodes[targetId];
-    if (targetNode) {
-        const rates = plannerGetNodeRates(targetNode);
-        if (rates) {
-            rates.inputsPerMachine.forEach(p => {
-                nodeDemand[targetId][p.item] = (nodeDemand[targetId][p.item] || 0) + (p.rate * targetNode.machineCount);
-            });
-        }
-    }
-
-    const processed = new Set();
-    while (queue.length > 0) {
-        const curr = queue.shift();
-        processed.add(curr);
-
-        if (curr !== targetId) {
-            // Satisfy demand
-            const currNode = plannerState.nodes[curr];
-            const rates = plannerGetNodeRates(currNode);
-            if (rates) {
-                let requiredCount = 0;
-                if (currNode.kind === 'portal') {
-                    // Do NOT auto-balance portals! Keep their user-defined machine count.
-                    requiredCount = currNode.machineCount;
-                } else {
-                    rates.outputsPerMachine.forEach(p => {
-                        const demand = nodeDemand[curr][p.item] || 0;
-                        if (p.rate > 0) requiredCount = Math.max(requiredCount, demand / p.rate);
-                    });
-                    currNode.machineCount = requiredCount;
-                }
-
-                // Propagate upstream
-                rates.inputsPerMachine.forEach(p => {
-                    nodeDemand[curr][p.item] = (nodeDemand[curr][p.item] || 0) + (p.rate * requiredCount);
-                });
-            }
-        }
-
-        // Pass demand upstream
-        Object.values(plannerState.edges).forEach(e => {
-            if (e.toNode === curr && upstreamIds.includes(e.fromNode)) {
-                // Divide demand among all internal suppliers
-                const numSuppliers = Object.values(plannerState.edges).filter(edge => edge.toNode === curr && edge.item === e.item && upstreamIds.includes(edge.fromNode)).length;
-                const demandToPass = (nodeDemand[curr][e.item] || 0) / (numSuppliers || 1);
-                
-                nodeDemand[e.fromNode][e.item] = (nodeDemand[e.fromNode][e.item] || 0) + demandToPass;
-                
-                inDegree[e.fromNode]--;
-                if (inDegree[e.fromNode] === 0) queue.push(e.fromNode);
-            }
+    // Virtual edges between real nodes (waypoint chains collapsed), like plannerResolveFlows does
+    const outEdgesOf = {};
+    edges.forEach(e => { (outEdgesOf[e.fromNode] = outEdgesOf[e.fromNode] || []).push(e); });
+    const vEdges = [];
+    edges.forEach(e => {
+        if (isWp(e.fromNode)) return;
+        if (!isWp(e.toNode)) { vEdges.push({ from: e.fromNode, to: e.toNode, item: e.item }); return; }
+        const sinks = new Set();
+        const walk = (wpId, visited) => (outEdgesOf[wpId] || []).forEach(n => {
+            if (n.item !== e.item || visited.has(n.toNode)) return;
+            if (isWp(n.toNode)) walk(n.toNode, new Set([...visited, n.toNode]));
+            else if (!sinks.has(n.toNode)) { sinks.add(n.toNode); vEdges.push({ from: e.fromNode, to: n.toNode, item: e.item }); }
         });
+        walk(e.toNode, new Set([e.toNode]));
+    });
+
+    // Per consumer port: the variable suppliers, and what fixed suppliers already deliver
+    const outDegree = {}; // "from::item" -> number of consumers it feeds
+    vEdges.forEach(v => { const k = v.from + '::' + v.item; outDegree[k] = (outDegree[k] || 0) + 1; });
+    const ports = {}; // "to::item" -> { to, item, varSuppliers, fixedSupply }
+    vEdges.forEach(v => {
+        const k = v.to + '::' + v.item;
+        const port = ports[k] = ports[k] || { to: v.to, item: v.item, varSuppliers: [], fixedSupply: 0 };
+        if (varSet.has(v.from)) port.varSuppliers.push(v.from);
+        else port.fixedSupply += perMachine(v.from, v.item, 'out') * (nodes[v.from]?.machineCount || 0) / outDegree[v.from + '::' + v.item];
+    });
+    const portList = Object.values(ports).filter(p => p.varSuppliers.length);
+
+    const x = {};
+    vars.forEach(id => { x[id] = 0; });
+    const count = id => varSet.has(id) ? x[id] : (nodes[id]?.machineCount || 0);
+
+    let converged = false;
+    for (let iter = 0; iter < 200000; iter++) {
+        const demand = {}; // "var::item" -> items/min it must deliver
+        portList.forEach(p => {
+            const need = Math.max(0, perMachine(p.to, p.item, 'in') * count(p.to) - p.fixedSupply);
+            const share = need / p.varSuppliers.length;
+            p.varSuppliers.forEach(sup => { const k = sup + '::' + p.item; demand[k] = (demand[k] || 0) + share; });
+        });
+        let maxDiff = 0, maxX = 0;
+        vars.forEach(id => {
+            const r = rates(id);
+            let req = 0;
+            if (r && !r.errorCode) r.outputsPerMachine.forEach(o => {
+                if (o.rate > 0) req = Math.max(req, (demand[id + '::' + o.item] || 0) / o.rate);
+            });
+            maxDiff = Math.max(maxDiff, Math.abs(req - x[id]) / Math.max(1, req));
+            maxX = Math.max(maxX, req);
+            x[id] = req;
+        });
+        if (maxDiff < 1e-13) { converged = true; break; }
+        if (!isFinite(maxX) || maxX > 1e9) break;
     }
+    if (!converged) return { ok: false };
+
+    vars.forEach(id => { nodes[id].machineCount = x[id]; });
+    return { ok: true };
 }
+
 function plannerAutoBalanceUpstream(nodeId) {
     if (!plannerState.nodes[nodeId]) return;
-    _calculateNodeDemand(nodeId);
-    
-    // Some nodes might have disjoint paths or cycles not handled perfectly by Kahn's above if there are cycles.
-    // It's a best-effort auto-balance.
+    const res = _calculateNodeDemand(nodeId);
+    if (!res.ok) {
+        alert('Could not balance: a loop upstream uses more of an item than it produces, so it can never feed itself.');
+        return;
+    }
     recomputeAndRefreshPlanner();
     savePlannerState();
     

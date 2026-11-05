@@ -59,10 +59,41 @@ function getPlannerModulesUsingPlan(planId) {
 
 const PLANNER_STEAM_HEAT_VALUE = 20; // 1 Steam = 20 P (Steam Boiler: 3000 P/s -> 150 Steam/s)
 
-/** Heated machines consume Steam instead of fuel when the global heating device is the Steam Heating Pad.
+/* ---- Per-plan energy settings (heating device / fuel / fertilizer) ----
+ * Each plan's data carries `energy: { heating, fuel, fert }`. Calculations use the plan currently
+ * being resolved (_plannerCalcPlanData, set by plannerResolveFlows while computing a module plan),
+ * otherwise the active plan. Missing values fall back to the Calculator's global settings. */
+let _plannerCalcPlanData = null;
+
+/** Energy settings from the global Calculator settings (used to initialize plans that have none) */
+function plannerDefaultEnergy() {
+    return {
+        heating: DB.settings.selectedHeatingDevice || 'Stone Furnace',
+        fuel: DB.settings.defaultFuel,
+        fert: DB.settings.defaultFert
+    };
+}
+
+/** Effective energy settings for a plan's data object */
+function plannerEnergyOf(planData) {
+    const e = (planData && planData.energy) || {};
+    const d = plannerDefaultEnergy();
+    return {
+        heating: (e.heating && DB.machines[e.heating]?.isGenerator) ? e.heating : d.heating,
+        fuel: (e.fuel && DB.items[e.fuel]?.heat) ? e.fuel : d.fuel,
+        fert: (e.fert && DB.items[e.fert]?.nutrientValue) ? e.fert : d.fert
+    };
+}
+
+/** Energy settings for the plan currently being calculated (module plan during its resolve, else the active plan) */
+function plannerEnergy() {
+    return plannerEnergyOf(_plannerCalcPlanData || (typeof plannerState !== 'undefined' ? plannerState : null));
+}
+
+/** Heated machines consume Steam instead of fuel when the plan's heating device is the Steam Heating Pad.
  *  The Steam Boiler itself always burns fuel (otherwise it would need its own output). */
 function plannerUsesSteamHeat(recipe) {
-    return DB.settings.selectedHeatingDevice === 'Steam Heating Pad' && recipe && recipe.machine !== 'Steam Boiler';
+    return plannerEnergy().heating === 'Steam Heating Pad' && recipe && recipe.machine !== 'Steam Boiler';
 }
 
 function plannerGetRawRecipe(recipeId) {
@@ -78,7 +109,7 @@ function plannerGetRecipeTime(recipe) {
     let recipeTime = recipe.baseTime || 1;
     const nutrientCost = recipe.nutrientCost || 0;
     if (nutrientCost > 0 && recipe.machine === "Nursery") {
-        const fertSpeed = DB.items[DB.settings.defaultFert]?.maxFertility || 1;
+        const fertSpeed = DB.items[plannerEnergy().fert]?.maxFertility || 1;
         recipeTime = nutrientCost / fertSpeed;
     }
     return recipeTime;
@@ -149,11 +180,12 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
 
     // Fuel use (heatCost -> fuel items/min, per machine)
     let heatItemsPerMachine = 0;
+    const heatByItem = {}; // fuel item -> items/min per machine (the part of that input port burned for heat)
     let needsHeat = false; // true for heated machines whether heat comes from fuel or Steam
     const machineDef = DB.machines[recipe.machine];
     if (machineDef && machineDef.heatCost) {
         needsHeat = true;
-        const heatingDeviceName = DB.settings.selectedHeatingDevice || "Stone Furnace";
+        const heatingDeviceName = plannerEnergy().heating;
         const heatingDevice = DB.machines[heatingDeviceName]?.isGenerator
             ? DB.machines[heatingDeviceName]
             : (DB.machines["Stone Furnace"] || { heatSelf: 0, slots: 3 });
@@ -172,9 +204,17 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
             if (existing) existing.rate += steamRate;
             else inputsPerMachine.push({ item: 'Steam', rate: steamRate });
         } else {
-            const fuelDef = DB.items[DB.settings.defaultFuel] || {};
+            const fuelName = plannerEnergy().fuel;
+            const fuelDef = DB.items[fuelName] || {};
             const grossFuelEnergy = (fuelDef.heat || 1) * (1 + lvlFuel * 0.10);
             heatItemsPerMachine = (totalHeatPerSecPerMachine * 60) / grossFuelEnergy;
+            if (fuelName && heatItemsPerMachine > 0) {
+                // The fuel is a real input port too, so it can be wired to the recipe that makes it.
+                heatByItem[fuelName] = heatItemsPerMachine;
+                const existing = inputsPerMachine.find(p => p.item === fuelName);
+                if (existing) existing.rate += heatItemsPerMachine;
+                else inputsPerMachine.push({ item: fuelName, rate: heatItemsPerMachine });
+            }
         }
     }
 
@@ -182,7 +222,7 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
     let fertItemsPerMachine = 0;
     if (nutrientCost > 0) {
         const totalNutrientsPerMinPerMachine = batchesPerMinPerMachine * nutrientCost;
-        const fertDef = DB.items[DB.settings.defaultFert] || { nutrientValue: 144 };
+        const fertDef = DB.items[plannerEnergy().fert] || { nutrientValue: 144 };
         const grossFertVal = fertDef.nutrientValue * (1 + lvlFert * 0.10);
         fertItemsPerMachine = totalNutrientsPerMinPerMachine / grossFertVal;
     }
@@ -201,7 +241,7 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
         goldCostPerMachine = mainOutRate * unitPrice;
     }
 
-    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, needsHeat, fertItemsPerMachine, goldCostPerMachine, errorCode: '' };
+    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, heatByItem, needsHeat, fertItemsPerMachine, goldCostPerMachine, errorCode: '' };
 }
 
 /**
@@ -221,6 +261,8 @@ function computeNodePorts(node) {
     result.inputs = rates.inputsPerMachine.map(p => ({ item: p.item, rate: p.rate * mc }));
     result.outputs = rates.outputsPerMachine.map(p => ({ item: p.item, rate: p.rate * mc }));
     result.heatItemsPerMin = rates.heatItemsPerMachine * mc;
+    result.heatByItem = {};
+    Object.entries(rates.heatByItem || {}).forEach(([item, r]) => { result.heatByItem[item] = r * mc; });
     result.needsHeat = !!rates.needsHeat || result.heatItemsPerMin > 0;
     result.fertItemsPerMin = rates.fertItemsPerMachine * mc;
     result.goldCostPerMin = rates.goldCostPerMachine * mc;
@@ -256,15 +298,22 @@ function plannerGetModuleRates(moduleId) {
         if (!plan) return {...result, errorCode: 'Missing Reference'};
         if (getPlannerModulesUsedBy(moduleId).hasCycle) return {...result, errorCode: 'Circular Reference'};
 
+        // The module computes with its own energy settings. Its fuel is a real input port (exposed below
+        // through inputShortage), so heat stays per fuel item; fertilizer is converted into the calling
+        // plan's fertilizer (same nutrients, different item).
+        const outer = plannerEnergy();
+        const inner = plannerEnergyOf(plan.data);
         const base = _computeFlowsForPlanData(plan);
         if (!base) return {...result, errorCode: 'Missing Reference'};
+        const fertRatio = (DB.items[inner.fert]?.nutrientValue || 144) / (DB.items[outer.fert]?.nutrientValue || 144);
 
         return {
             recipe: null,
             inputsPerMachine: Object.entries(base.inputShortage).map(([item, qty]) => ({ item, rate: qty })),
             outputsPerMachine: Object.entries(base.outputSurplus).map(([item, qty]) => ({ item, rate: qty })),
             heatItemsPerMachine: base.heatTotal,
-            fertItemsPerMachine: base.fertTotal,
+            heatByItem: base.heatByItem,
+            fertItemsPerMachine: base.fertTotal * fertRatio,
             goldCostPerMachine: base.goldCostTotal,
             errorCode: ''
         };
@@ -288,9 +337,11 @@ function _computeFlowsForPlanData(plan) {
     const inputShortage = {};
     const outputSurplus = {};
     let heatTotal = 0, fertTotal = 0, goldCostTotal = 0;
+    const heatByItem = {};
 
     Object.values(flow.nodePortsCache).forEach(ports => {
         heatTotal += ports.heatItemsPerMin || 0;
+        Object.entries(ports.heatByItem || {}).forEach(([item, r]) => { heatByItem[item] = (heatByItem[item] || 0) + r; });
         fertTotal += ports.fertItemsPerMin || 0;
         goldCostTotal += ports.goldCostPerMin || 0;
     });
@@ -305,7 +356,7 @@ function _computeFlowsForPlanData(plan) {
         else inputShortage[item] = (inputShortage[item] || 0) + val;
     });
 
-    return { inputShortage: inputShortage, outputSurplus: outputSurplus, heatTotal: heatTotal, fertTotal: fertTotal, goldCostTotal: goldCostTotal };
+    return { inputShortage: inputShortage, outputSurplus: outputSurplus, heatTotal: heatTotal, heatByItem: heatByItem, fertTotal: fertTotal, goldCostTotal: goldCostTotal };
 }
 
 
@@ -329,6 +380,16 @@ function plannerPortKey(nodeId, item, dir) {
  * @returns { nodePortsCache, portTheoretical, portRemaining, portConnections, edgeFlow } the computed flows and states
  */
 function plannerResolveFlows(planData = null) {
+    const prevCalcPlan = _plannerCalcPlanData;
+    _plannerCalcPlanData = planData || plannerState;
+    try {
+        return _plannerResolveFlowsImpl(planData);
+    } finally {
+        _plannerCalcPlanData = prevCalcPlan;
+    }
+}
+
+function _plannerResolveFlowsImpl(planData) {
     let isMain = false;
     if (planData === null) {
         planData = plannerState;
@@ -571,6 +632,16 @@ function _autoGenerateUpstreamNodesCore(nodeId) {
 
     const plans = [];
     deficits.forEach(({ item, deficit }) => {
+        // The node makes this item itself (e.g. Coke-fuelled Coke crucible): feed it from its own output
+        if (sourceNode.kind !== 'portal' && sourceNode.kind !== 'waypoint' && ports.outputs.some(o => o.item === item)) {
+            const exists = Object.values(plannerState.edges).some(e => e.fromNode === nodeId && e.toNode === nodeId && e.item === item);
+            if (!exists) {
+                plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
+                const edgeId = 'pedge_' + plannerState._edgeSeq;
+                plannerState.edges[edgeId] = { id: edgeId, item, fromNode: nodeId, toNode: nodeId, createdAt: plannerState._edgeSeq };
+            }
+            return;
+        }
         const recipe = getActiveRecipe(item);
         if (!recipe) return; // Skip items without a recipe (raw materials / external inputs)
 
@@ -688,6 +759,9 @@ function autoGenerateAllUpstreamNodes(rootNodeId) {
 
     dfs(rootNodeId);
     console.info('Create upstream nodes: ' + allCreated.length);
+
+    // Size everything (including loops such as self-fed fuel) to exactly what the root needs
+    if (!_calculateNodeDemand(rootNodeId).ok) console.warn('Upstream contains a loop that cannot feed itself; left unbalanced.');
 
     _plannerSelectedNodeIds.clear();
     _plannerSelectedNodeIds.add(rootNodeId);

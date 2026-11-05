@@ -693,8 +693,12 @@
                 <button class="split-btn" onclick="onPlannerAddPortalClick()">+ 🌀 Portal</button>
                 <button class="split-btn" onclick="onPlannerAddWaypointClick()">+ 📍 Waypoint</button>
                 <span class="planner-toolbar-divider"></span>
-                <select id="planner-heat-select" class="planner-plan-select" onchange="onPlannerHeatSourceChange(this.value)"
-                        title="Heating device for heated machines (shared with Calculator settings). Steam Heating Pad adds a Steam input port instead of fuel."></select>
+                <select id="planner-heat-select" class="planner-plan-select" onchange="onPlannerEnergyChange('heating', this.value)"
+                        title="Heating device for heated machines in this plan. Steam Heating Pad adds a Steam input port instead of fuel."></select>
+                <select id="planner-fuel-select" class="planner-plan-select" onchange="onPlannerEnergyChange('fuel', this.value)"
+                        title="Fuel burned by heated machines in this plan"></select>
+                <select id="planner-fert-select" class="planner-plan-select" onchange="onPlannerEnergyChange('fert', this.value)"
+                        title="Fertilizer used by Nurseries in this plan"></select>
                 <span class="planner-toolbar-divider"></span>
                 <button id="planner-undo-btn" class="split-btn" onclick="plannerUndo()" title="Undo (Ctrl+Z)">↺ Undo</button>
                 <button id="planner-redo-btn" class="split-btn" onclick="plannerRedo()" title="Redo (Ctrl+Y)">↻ Redo</button>

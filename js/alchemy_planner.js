@@ -81,6 +81,7 @@ let _plannerSettings = {
     summaryCollapsed: false,
     summarySectionCollapsed: {
         cost: false,
+        heating: false,
         output: false,
         input: false,
         machines: true
@@ -149,6 +150,7 @@ function loadPlannerSettings() {
         _plannerSettings.summaryCollapsed = saved.summaryCollapsed ?? false;
         _plannerSettings.summarySectionCollapsed = {
             cost: saved.summarySectionCollapsed?.cost ?? false,
+            heating: saved.summarySectionCollapsed?.heating ?? false,
             output: saved.summarySectionCollapsed?.output ?? false,
             input: saved.summarySectionCollapsed?.input ?? false,
             machines: saved.summarySectionCollapsed?.machines ?? true
@@ -179,7 +181,8 @@ function savePlannerSettings() {
 
 /** Create a brand-new, empty plan data object (the initial plannerState) */
 function _createEmptyPlanData() {
-    return { nodes: {}, edges: {}, viewport: { x: 0, y: 0, zoom: 1 }, _edgeSeq: 0, _nodeSeq: 0, gridSize: 0 };
+    return { nodes: {}, edges: {}, viewport: { x: 0, y: 0, zoom: 1 }, _edgeSeq: 0, _nodeSeq: 0, gridSize: 0,
+             energy: plannerDefaultEnergy() };
 }
 
 /** Create a new plan entry (with meta: id/name/updatedAt) */
@@ -213,6 +216,8 @@ function loadPlannerLibrary() {
 
     // Fill in node kinds missing from older saves
     Object.values(plannerLibrary.plans).forEach(plan => {
+        // Plans saved before per-plan energy settings: freeze the current global settings into them
+        if (!plan.data.energy) plan.data.energy = plannerDefaultEnergy();
         Object.values(plan.data.nodes || {}).forEach(node => {
             if (!node.kind) node.kind = node.moduleId ? 'module' : 'recipe';
         });
@@ -696,32 +701,51 @@ function plannerFitToView(nodeIds = []) {
     savePlannerSettings();
 }
 
-/* ---------------- HEAT SOURCE (shared with Calculator "Heating Device") ---------------- */
+/* ---------------- ENERGY SETTINGS (per plan: heating device / fuel / fertilizer) ---------------- */
 
+/** Fill the toolbar heating/fuel/fertilizer selects and select the active plan's values */
 function renderPlannerHeatSelect() {
-    const sel = document.getElementById('planner-heat-select');
-    if (!sel) return;
-    sel.innerHTML = '';
-    Object.entries(DB.machines || {})
-        .filter(([, m]) => m.isGenerator)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .forEach(([name]) => {
-            const icon = name === 'Steam Heating Pad' ? '♨' : '🔥';
-            sel.appendChild(new Option(`${icon} ${t(name, 'machines')}`, name));
-        });
-    sel.value = DB.settings.selectedHeatingDevice || 'Stone Furnace';
+    const energy = plannerEnergyOf(plannerState);
+    const heatSel = document.getElementById('planner-heat-select');
+    if (heatSel) {
+        heatSel.innerHTML = '';
+        Object.entries(DB.machines || {})
+            .filter(([, m]) => m.isGenerator)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .forEach(([name]) => {
+                const icon = name === 'Steam Heating Pad' ? '♨' : '🔥';
+                heatSel.appendChild(new Option(`${icon} ${t(name, 'machines')}`, name));
+            });
+        heatSel.value = energy.heating;
+    }
+    const fuels = [], ferts = [];
+    Object.entries(DB.items || {}).forEach(([name, def]) => {
+        if (def.heat) fuels.push([name, def.heat]);
+        if (def.nutrientValue) ferts.push([name, def.nutrientValue]);
+    });
+    const fill = (id, list, unit, value) => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = '';
+        list.sort((a, b) => b[1] - a[1]).forEach(([name, v]) => sel.appendChild(new Option(`${name} (${v} ${unit})`, name)));
+        sel.value = value;
+    };
+    fill('planner-fuel-select', fuels, 'P', energy.fuel);
+    fill('planner-fert-select', ferts, 'V', energy.fert);
 }
 
-function onPlannerHeatSourceChange(deviceName) {
-    DB.settings.selectedHeatingDevice = deviceName;
-    const mainSel = document.getElementById('heatingDeviceSelect');
-    if (mainSel) {
-        mainSel.value = deviceName;
-        if (typeof onLogisticsChange === 'function') onLogisticsChange(); // persists + recalculates Calculator tab
-    } else if (typeof persist === 'function') {
-        persist();
-    }
+/** Point the toolbar selects at the active plan's values (after plan switch / undo / redo) */
+function syncPlannerEnergySelects() {
+    const energy = plannerEnergyOf(plannerState);
+    [['planner-heat-select', energy.heating], ['planner-fuel-select', energy.fuel], ['planner-fert-select', energy.fert]]
+        .forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v) el.value = v; });
+}
+
+/** Change one energy setting ('heating' | 'fuel' | 'fert') of the active plan only */
+function onPlannerEnergyChange(field, value) {
+    plannerState.energy = Object.assign(plannerEnergyOf(plannerState), { [field]: value });
     renderPlanner();
+    savePlannerState();
 }
 
 /* ---------------- ADD / REMOVE NODES ---------------- */
@@ -809,6 +833,29 @@ function addPlannerNode(itemName, graphX, graphY, kind = 'recipe') {
     savePlannerState();
 }
 
+/** Remove a waypoint but keep its route: every line coming in is reconnected straight to every line going out */
+function dissolvePlannerWaypoint(wpId) {
+    const edges = Object.values(plannerState.edges);
+    const ins = edges.filter(e => e.toNode === wpId);
+    const outs = edges.filter(e => e.fromNode === wpId);
+    ins.forEach(a => outs.forEach(b => {
+        if (a.item !== b.item && a.item !== 'Any' && b.item !== 'Any') return;
+        const item = a.item === 'Any' ? b.item : a.item;
+        const from = a.fromNode, to = b.toNode;
+        if (from === wpId || to === wpId) return;
+        if (from === to && ['waypoint', 'portal'].includes(plannerState.nodes[from]?.kind)) return;
+        if (Object.values(plannerState.edges).some(e => e.fromNode === from && e.toNode === to && e.item === item)) return;
+        plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
+        const id = 'pedge_' + plannerState._edgeSeq;
+        // Same priority the route had (the flow solver ranks a waypoint route by its latest edge)
+        const edge = { id, item, fromNode: from, toNode: to, createdAt: Math.max(a.createdAt || 0, b.createdAt || 0) };
+        const color = a.color || b.color;
+        if (color) edge.color = color;
+        plannerState.edges[id] = edge;
+    }));
+    removePlannerNode(wpId); // drops the waypoint and its own edges, renders + saves
+}
+
 function removePlannerNode(nodeId) {
     delete plannerState.nodes[nodeId];
     Object.keys(plannerState.edges).forEach(eid => {
@@ -846,6 +893,7 @@ function renderPlanner() {
     const layer = document.getElementById('planner-nodes-layer');
     if (!layer) return;
     const flows = plannerResolveFlows();
+    syncPlannerEnergySelects();
     layer.innerHTML = '';
     Object.values(plannerState.nodes).forEach(node => {
         const el = createPlannerNodeEl(node, flows);
@@ -995,6 +1043,7 @@ function renderPlannerPortalNode(wrap, node, flows) {
                 <button class="planner-gear-btn" title="switch direction" onclick="event.stopPropagation(); plannerToggleNodeDirection('${node.id}')">
                 ⇄
             </button>
+            <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
             <button class="planner-close-btn" onclick="removePlannerNode('${node.id}')">
                 ✕
             </button>
@@ -1012,21 +1061,12 @@ function renderPlannerPortalNode(wrap, node, flows) {
                     title="${t('Items per minute', 'ui')}"
                     oninput="updatePlannerMachineCount('${node.id}', this.value)">
                 <span class="planner-portal-rate-unit">/m</span>
-                <button class="planner-gear-btn" title="${t('Balance existing upstream to this rate, then generate whatever is still missing', 'ui')}" onclick="event.stopPropagation(); plannerPortalBuildUpstream('${node.id}')">🌳</button>
             </div>
         </div>
     `;
 
     attachPlannerNodeDrag(wrap, node); 
     return wrap;
-}
-
-/** Portal 🌳: rescale the upstream chain that already exists to the portal's rate
- *  (same as Auto-Balance Upstream), then recursively generate nodes only for remaining shortages. */
-function plannerPortalBuildUpstream(nodeId) {
-    if (!plannerState.nodes[nodeId]) return;
-    if (getPlannerUpstreamNodeIds(nodeId).size > 1) _calculateNodeDemand(nodeId);
-    autoGenerateAllUpstreamNodes(nodeId); // renders + saves
 }
 
 function plannerToggleNodeDirection(nodeId) {
@@ -1067,6 +1107,8 @@ function renderPlannerPortsHtml(node, ports, flows) {
     </div>`;
 }
 
+const PLANNER_SHOW_EPS = 0.005; // leftovers below this would show as 0.00, so treat them as balanced
+
 function renderPlannerPortRow(nodeId, port, dir, flows) {
     const itemDef = DB.items[port.item] || {};
     const key = plannerPortKey(nodeId, port.item, dir);
@@ -1080,19 +1122,19 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
     if (dir === 'out') {
         if (connected) {
             colorClass = 'planner-port-green';
-            if (remaining > 0.001) {
+            if (remaining >= PLANNER_SHOW_EPS) {
                 badgeHtml = `<span class="planner-port-badge planner-badge-surplus">+${formatVal(remaining)}</span>`;
                 colorClass = rateClass = 'planner-port-yellow';
             }
         } else {
-            if (port.rate > 0.001) {
+            if (port.rate >= PLANNER_SHOW_EPS) {
                 badgeHtml = `<span class="planner-port-badge planner-badge-surplus">+${formatVal(port.rate)}</span>`;
                 colorClass = 'planner-port-yellow';
             }
         }
     } else {
         if (connected) {
-            if (remaining > 0.001) {
+            if (remaining >= PLANNER_SHOW_EPS) {
                 colorClass = rateClass = 'planner-port-red';
                 badgeHtml = `<span class="planner-port-badge planner-badge-shortage">-${formatVal(remaining)}</span>`;
             } else {
@@ -1105,21 +1147,27 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
 
     const dot = `<span class="planner-port-dot ${colorClass}" data-item="${port.item}" data-dir="${dir}"></span>`;
     const icon = `<img src="img/item${itemDef.id ?? 0}.png" width="16" height="16">`;
-    const name = `<span class="planner-port-name">${port.item}</span>`;
+    // Heating fuel / Steam on an input: mark the port so it's clear it feeds the heating
+    const heatPart = dir === 'in' ? ((flows && flows.nodePortsCache[nodeId]?.heatByItem?.[port.item]) || 0) : 0;
+    const isHeatPort = heatPart > 0 || (dir === 'in' && port.item === 'Steam' && flows?.nodePortsCache[nodeId]?.needsHeat);
+    const name = `<span class="planner-port-name">${isHeatPort ? '🔥' : ''}${port.item}</span>`;
     const rate = `<span class="planner-port-rate">${formatVal(port.rate)}</span>`;
-    if (dir === 'in') return `<div class="planner-port planner-port-in ${rateClass}" title="${port.item}">${badgeHtml}${dot}${rate}${icon}${name}</div>`;
+    const title = isHeatPort ? `${port.item}: heating${heatPart > 0 && heatPart < port.rate - 0.0001 ? ` (${formatVal(heatPart)}/m of it)` : ''}` : port.item;
+    if (dir === 'in') return `<div class="planner-port planner-port-in ${rateClass}${isHeatPort ? ' planner-port-heat' : ''}" title="${title}">${badgeHtml}${dot}${rate}${icon}${name}</div>`;
     return `<div class="planner-port planner-port-out ${rateClass}" title="${port.item}">${name}${icon}${rate}${dot}${badgeHtml}</div>`;
 }
 
 function renderPlannerHeatFertHtml(ports, node) {
     let html = renderPlannerBeltChipHtml(node);
-    if (ports.heatItemsPerMin > 0.001) {
-        const fuelDef = DB.items[DB.settings.defaultFuel] || {};
-        html += `<span class="heat-tag">-${formatVal(ports.heatItemsPerMin)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small" title="${DB.settings.defaultFuel}"></span>`;
-    }
+    Object.entries(ports.heatByItem || {}).forEach(([fuelName, rate]) => {
+        if (!(rate > 0.001)) return;
+        const fuelDef = DB.items[fuelName] || {};
+        html += `<span class="heat-tag" title="${fuelName} burned for heat (included in the ${fuelName} input)">🔥 ${formatVal(rate)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"></span>`;
+    });
     if (ports.fertItemsPerMin > 0.001) {
-        const fertDef = DB.items[DB.settings.defaultFert] || {};
-        html += `<span class="bio-tag">-${formatVal(ports.fertItemsPerMin)}/m <img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small" title="${DB.settings.defaultFert}"></span>`;
+        const fertName = plannerEnergy().fert;
+        const fertDef = DB.items[fertName] || {};
+        html += `<span class="bio-tag">-${formatVal(ports.fertItemsPerMin)}/m <img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small" title="${fertName}"></span>`;
     }
     if (ports.goldCostPerMin > 0.001) {
         html += `<span class="gold-tag">-${formatVal(ports.goldCostPerMin)}/m <img src="img/copper.png" class="item-icon-small"></span>`;
@@ -1515,10 +1563,13 @@ function getPlannerPortGraphPos(nodeId, item, dir) {
     return plannerScreenToGraph(rect.left + rect.width / 2, rect.top + rect.height / 2);
 }
 
-function buildPlannerEdgePath(p1, p2, sign1 = 1, sign2 = -1) {
+/** t1/t2 (optional unit vectors): travel direction when leaving p1 / arriving at p2 (used for waypoints,
+ *  whose handles follow the route at any angle and scale with the segment so short hops don't overshoot) */
+function buildPlannerEdgePath(p1, p2, sign1 = 1, sign2 = -1, t1 = null, t2 = null) {
     const dx = Math.max(40, Math.abs(p2.x - p1.x) * 0.5);
-    const c1 = { x: p1.x + dx * sign1, y: p1.y };
-    const c2 = { x: p2.x + dx * sign2, y: p2.y };
+    const wpLen = Math.max(15, Math.hypot(p2.x - p1.x, p2.y - p1.y) * 0.35);
+    const c1 = t1 ? { x: p1.x + t1.x * wpLen, y: p1.y + t1.y * wpLen } : { x: p1.x + dx * sign1, y: p1.y };
+    const c2 = t2 ? { x: p2.x - t2.x * wpLen, y: p2.y - t2.y * wpLen } : { x: p2.x + dx * sign2, y: p2.y };
     const d = `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`;
     // True midpoint of the cubic Bezier at t = 0.5, used to position the label
     const mid = {
@@ -1600,9 +1651,59 @@ function _plannerBuildChevronPath(p1, c1, c2, p2, spacing = 9, size = 5) {
     return d;
 }
 
+/** True if the edge ends at a heating input (fuel burned for heat, or Steam into a heated machine),
+ *  following waypoints/portals downstream so the whole fuel line is marked. */
+function plannerEdgeFeedsHeat(edge, flows, seen = new Set()) {
+    if (seen.has(edge.id)) return false;
+    seen.add(edge.id);
+    const toNode = plannerState.nodes[edge.toNode];
+    if (!toNode) return false;
+    if (toNode.kind === 'waypoint' || toNode.kind === 'portal') {
+        return Object.values(plannerState.edges).some(e => e.fromNode === toNode.id && e.item === edge.item && plannerEdgeFeedsHeat(e, flows, seen));
+    }
+    const ports = flows.nodePortsCache[toNode.id];
+    if (!ports) return false;
+    if ((ports.heatByItem?.[edge.item] || 0) > 0) return true;
+    return edge.item === 'Steam' && !!ports.needsHeat;
+}
+
+/**
+ * Waypoints turn automatically: a line passes through a waypoint along the direction from where it
+ * comes from to where it goes next (any angle), so chains of waypoints form one smooth curve.
+ * With only one side connected, it keeps the direction it arrives in / points toward where it goes.
+ * Returns { waypointId: unit vector {x, y} }.
+ */
+function plannerWaypointDirections() {
+    const dirs = {};
+    const mean = ps => ({ x: ps.reduce((a, p) => a + p.x, 0) / ps.length, y: ps.reduce((a, p) => a + p.y, 0) / ps.length });
+    Object.values(plannerState.nodes).forEach(n => {
+        if (n.kind !== 'waypoint') return;
+        const ins = [], outs = [];
+        let here = null;
+        Object.values(plannerState.edges).forEach(e => {
+            if (e.toNode === n.id) {
+                const p = getPlannerPortGraphPos(e.fromNode, e.item, 'out'); if (p) ins.push(p);
+                here = here || getPlannerPortGraphPos(n.id, e.item, 'in');
+            }
+            if (e.fromNode === n.id) {
+                const p = getPlannerPortGraphPos(e.toNode, e.item, 'in'); if (p) outs.push(p);
+                here = here || getPlannerPortGraphPos(n.id, e.item, 'out');
+            }
+        });
+        let v = null;
+        if (ins.length && outs.length) { const a = mean(ins), b = mean(outs); v = { x: b.x - a.x, y: b.y - a.y }; }
+        else if (ins.length && here) { const a = mean(ins); v = { x: here.x - a.x, y: here.y - a.y }; }
+        else if (outs.length && here) { const b = mean(outs); v = { x: b.x - here.x, y: b.y - here.y }; }
+        const len = v ? Math.hypot(v.x, v.y) : 0;
+        dirs[n.id] = len > 1 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };
+    });
+    return dirs;
+}
+
 function renderPlannerEdges(flows) {
     const svg = document.getElementById('planner-svg-layer');
     if (!svg) return;
+    const wpDir = plannerWaypointDirections();
     const beltSpeed = getBeltSpeed(DB.settings.lvlBelt || 0);
     const useChevron = _plannerSettings.edgeStyle === 1;
     let html = '';
@@ -1616,10 +1717,12 @@ function renderPlannerEdges(flows) {
         const toNode = plannerState.nodes[edge.toNode];
         const sign1 = (fromNode && fromNode.direction === -1) ? -1 : 1;
         const sign2 = (toNode && toNode.direction === -1) ? 1 : -1;
+        const t1 = fromNode?.kind === 'waypoint' ? wpDir[fromNode.id] : null; // travel direction leaving
+        const t2 = toNode?.kind === 'waypoint' ? wpDir[toNode.id] : null;     // travel direction arriving
 
         const flow = flows.edgeFlow[edge.id] || 0;
         const itemDef = DB.items[edge.item] || {};
-        const { d, mid, c1, c2 } = buildPlannerEdgePath(p1, p2, sign1, sign2);
+        const { d, mid, c1, c2 } = buildPlannerEdgePath(p1, p2, sign1, sign2, t1, t2);
 
         // Build the line path for the current mode
         const linePathHtml = useChevron
@@ -1628,8 +1731,10 @@ function renderPlannerEdges(flows) {
 
         const beltCount = !itemDef.liquid ? (flow / beltSpeed) : null;
         // edge.color is now set as the group's color and picked up by stroke: currentColor
-        const colorStyle = edge.color ? ` style="color:${edge.color};"` : '';
-        const labelStyle = edge.color ? ` style="border-left:3px solid ${edge.color};"` : '';
+        // Default color: fuel red for lines feeding heating, otherwise the CSS accent (green)
+        const edgeColor = edge.color || (plannerEdgeFeedsHeat(edge, flows) ? 'var(--fuel)' : '');
+        const colorStyle = edgeColor ? ` style="color:${edgeColor};"` : '';
+        const labelStyle = edgeColor ? ` style="border-left:3px solid ${edgeColor};"` : '';
         const beltArg = beltCount !== null ? beltCount : 'null';
         const hoverAttrs = `onmouseenter="showPlannerEdgeTooltip(event, '${edge.item.replace(/'/g, "\\'")}', ${flow}, ${beltArg})" onmousemove="movePlannerEdgeTooltip(event)" onmouseleave="hidePlannerEdgeTooltip()"`;
 
@@ -1829,7 +1934,8 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
     const targetItem = targetDotEl.dataset.item;
     let targetDir = targetDotEl.dataset.dir;
     
-    if (targetNodeId === sourceNodeId) return;
+    // A node may feed itself (e.g. Coke fuelling the crucible that makes it), but waypoints/portals can't
+    if (targetNodeId === sourceNodeId && ['waypoint', 'portal'].includes(plannerState.nodes[sourceNodeId]?.kind)) return;
 
     // Waypoints expose both directions at the same spot: if either end is a waypoint,
     // flip that end's direction so the connection always succeeds.
@@ -1909,7 +2015,9 @@ function _plannerEmptyHintEntries() {
         [t('+ / − / F key', 'ui'), t('Zoom / Fit all nodes to view', 'ui')],
         [t('Ctrl/Cmd + Z / Y', 'ui'), t('Undo / Redo', 'ui')],
         [t('Drag port dot to another port', 'ui'), t('Connect two ports', 'ui')],
-        [t('Drag port dot to empty canvas', 'ui'), t('Create a new connected node', 'ui')]
+        [t('Drag port dot to empty canvas', 'ui'), t('Create a new connected node', 'ui')],
+        [t('Middle-click waypoint', 'ui'), t('Remove the dot but keep the line', 'ui')],
+        [t('Double-click waypoint', 'ui'), t('Delete the dot and its lines', 'ui')]
     ];
 }
 
@@ -1959,9 +2067,16 @@ function renderPlannerWaypointNode(wrap, node, flows) {
 
     const throughput = flows ? (flows.portTheoretical[outKey] || 0) : 0;
     const tip = `${item === 'Any' ? t('Waypoint', 'ui') : item}${throughput > 0.001 ? ' · ' + formatVal(throughput) + '/m' : ''}\n`
-        + t('Drag ring: move · Drag center: connect · Double-click: delete', 'ui');
+        + t('Drag ring: move · Drag center: connect · Middle-click: remove dot, keep line · Double-click: delete with its lines', 'ui');
 
     wrap.ondblclick = (e) => { e.stopPropagation(); removePlannerNode(node.id); };
+    // Middle click: dissolve the waypoint but keep the line (stop the browser's autoscroll on mousedown)
+    wrap.addEventListener('mousedown', e => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); } });
+    wrap.addEventListener('auxclick', e => {
+        if (e.button !== 1) return;
+        e.preventDefault(); e.stopPropagation();
+        dissolvePlannerWaypoint(node.id);
+    });
 
     // Outer ring = drag handle (planner-node-header so the standard node drag applies).
     // Center = both ports stacked at the same spot, so edges meet at the dot's center.

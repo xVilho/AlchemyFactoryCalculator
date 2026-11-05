@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alchemy Data Backup</title>
+<style>
+  :root { --bg:#1a1a1a; --panel:#2d2d2d; --border:#444; --text:#e0e0e0; --muted:#9a9a9a;
+          --accent:#4caf50; --info:#2196f3; --warn:#ff9800; --danger:#f44336; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px; background:var(--bg); color:var(--text);
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height:1.5; }
+  main { max-width:760px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 24px; font-size:.95rem; }
+  section { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+            padding:16px; margin-bottom:16px; }
+  h2 { font-size:1.05rem; margin:0 0 8px; }
+  p { margin:0 0 12px; }
+  button, label.btn { display:inline-block; padding:9px 16px; border:none; border-radius:4px;
+            font-weight:600; font-size:.95rem; cursor:pointer; color:#fff; font-family:inherit; }
+  .b-export { background:var(--accent); }
+  .b-import { background:var(--info); }
+  .b-danger { background:var(--danger); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; font-size:.88rem; margin:8px 0 12px; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  code { background:#111; padding:1px 5px; border-radius:3px; font-size:.85em; }
+  .msg { margin-top:10px; padding:8px 12px; border-radius:4px; font-size:.9rem; display:none; }
+  .msg.ok { display:block; background:rgba(76,175,80,.15); border:1px solid var(--accent); }
+  .msg.err { display:block; background:rgba(244,67,54,.15); border:1px solid var(--danger); }
+  .msg.warn { display:block; background:rgba(255,152,0,.15); border:1px solid var(--warn); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .check { display:flex; gap:8px; align-items:flex-start; font-size:.9rem; margin:8px 0 12px; }
+  a { color:#64b5f6; }
+  .note { color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Alchemy Data Backup</h1>
+  <p class="sub">Save and restore your planner plans, cauldron recipes, settings and database edits.
+    The data lives in this browser, tied to where the calculator is opened from.
+    Open this page from the <b>same folder or address</b> as <code>index.html</code>.</p>
+
+  <section>
+    <h2>Data currently in this browser</h2>
+    <div id="current"></div>
+    <div class="row">
+      <button class="b-export" id="btn-export">Download backup file</button>
+      <a href="index.html">Back to calculator</a>
+    </div>
+    <div id="export-msg" class="msg"></div>
+  </section>
+
+  <section>
+    <h2>Restore from a backup file</h2>
+    <p>Choose a <code>.json</code> backup file. Before anything is written, you'll see what it contains.</p>
+    <div class="row">
+      <label class="btn b-import" for="file">Choose backup file…</label>
+      <input type="file" id="file" accept=".json,application/json" hidden>
+      <span id="file-name" class="note"></span>
+    </div>
+    <div id="preview"></div>
+    <div id="restore-controls" style="display:none">
+      <label class="check"><input type="checkbox" id="opt-clear">
+        <span>Also remove <code>alchemy_</code> data that isn't in the backup file. Leave this off to keep
+        anything the file doesn't include.</span></label>
+      <p class="note">A safety copy of your current data is downloaded automatically before the restore.</p>
+      <button class="b-danger" id="btn-restore">Restore this backup</button>
+    </div>
+    <div id="import-msg" class="msg"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const PREFIX = 'alchemy_';
+  const LABELS = {
+    alchemy_planner_library_v1: 'Planner plans',
+    alchemy_planner_settings_v1: 'Planner settings',
+    alchemy_cauldron_v1: 'Cauldron recipes',
+    alchemy_factory_save_v1: 'Recipe database (active)',
+    alchemy_source_v1: 'Database editor source',
+    alchemy_source_backup_v1: 'Database editor backup',
+    alchemy_settings_v1: 'Settings',
+    alchemy_settings_backup_v1: 'Settings backup',
+    alchemy_i18n_source_v1: 'Translations',
+    alchemy_i18n_source_backup_v1: 'Translations backup'
+  };
+  const $ = id => document.getElementById(id);
+  let pending = null;
+
+  function safeStorage() {
+    try { const s = window.localStorage; s.getItem('x'); return s; } catch (e) { return null; }
+  }
+  const ls = safeStorage();
+
+  function collect() {
+    const d = {};
+    if (!ls) return d;
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && k.startsWith(PREFIX)) d[k] = ls.getItem(k);
+    }
+    return d;
+  }
+
+  function planCount(raw) {
+    try { const p = JSON.parse(raw); return p && p.plans ? Object.keys(p.plans).length : null; }
+    catch (e) { return null; }
+  }
+
+  function fmtSize(n) { return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB'; }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  function table(d) {
+    const keys = Object.keys(d).sort();
+    if (!keys.length) return '<p class="note">No calculator data found.</p>';
+    let h = '<table><tr><th>Data</th><th>Key</th><th class="num">Size</th></tr>';
+    for (const k of keys) {
+      let label = LABELS[k] || '';
+      if (k === 'alchemy_planner_library_v1') {
+        const n = planCount(d[k]);
+        if (n !== null) label += ' (' + n + ' plan' + (n === 1 ? '' : 's') + ')';
+      }
+      h += '<tr><td>' + esc(label) + '</td><td><code>' + esc(k) + '</code></td><td class="num">' +
+           fmtSize((d[k] || '').length) + '</td></tr>';
+    }
+    return h + '</table>';
+  }
+
+  function render() {
+    if (!ls) {
+      $('current').innerHTML = '<p class="note">This browser blocks storage on this page, so there is nothing to back up or restore here.</p>';
+      $('btn-export').disabled = true;
+      return;
+    }
+    const d = collect();
+    $('current').innerHTML = table(d);
+    $('btn-export').disabled = !Object.keys(d).length;
+  }
+
+  function show(el, cls, text) { el.className = 'msg ' + cls; el.textContent = text; }
+
+  function download(d, suffix) {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const payload = { format: 'alchemy-backup', version: 1, createdAt: new Date().toISOString(),
+                      origin: location.origin + location.pathname, data: d };
+    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'alchemy_backup_' + stamp + (suffix || '') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  $('btn-export').onclick = () => {
+    const d = collect();
+    download(d);
+    show($('export-msg'), 'ok', 'Backup downloaded (' + Object.keys(d).length + ' entries).');
+  };
+
+  // Accepts this tool's format, or a plain { "alchemy_x": "..." } object (restore.html format).
+  function parseBackup(text) {
+    const obj = JSON.parse(text);
+    const src = obj && obj.format === 'alchemy-backup' && obj.data ? obj.data : obj;
+    if (!src || typeof src !== 'object' || Array.isArray(src)) throw new Error('Not a backup file.');
+    const d = {};
+    for (const k in src) {
+      if (!k.startsWith(PREFIX)) continue;
+      d[k] = typeof src[k] === 'string' ? src[k] : JSON.stringify(src[k]);
+    }
+    if (!Object.keys(d).length) throw new Error('The file contains no calculator data.');
+    return { data: d, createdAt: obj.createdAt || null };
+  }
+
+  $('file').onchange = e => {
+    const f = e.target.files[0];
+    pending = null;
+    $('preview').innerHTML = '';
+    $('restore-controls').style.display = 'none';
+    $('import-msg').className = 'msg';
+    if (!f) return;
+    $('file-name').textContent = f.name;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        pending = parseBackup(r.result);
+        const when = pending.createdAt ? ' Created ' + new Date(pending.createdAt).toLocaleString() + '.' : '';
+        $('preview').innerHTML = '<p class="note">This file contains:' + esc(when) + '</p>' + table(pending.data);
+        $('restore-controls').style.display = ls ? 'block' : 'none';
+      } catch (err) {
+        show($('import-msg'), 'err', 'Could not read file: ' + err.message);
+      }
+    };
+    r.readAsText(f);
+    e.target.value = '';
+  };
+
+  $('btn-restore').onclick = () => {
+    if (!pending || !ls) return;
+    const n = Object.keys(pending.data).length;
+    const clear = $('opt-clear').checked;
+    if (!confirm('Restore ' + n + ' entries' + (clear ? ' and remove other calculator data' : '') +
+                 '? A safety copy of the current data will be downloaded first.')) return;
+    const current = collect();
+    if (Object.keys(current).length) download(current, '_before-restore');
+    try {
+      if (clear) for (const k in current) if (!(k in pending.data)) ls.removeItem(k);
+      for (const k in pending.data) ls.setItem(k, pending.data[k]);
+      show($('import-msg'), 'ok', 'Restored ' + n + ' entries. Open the calculator to see them.');
+      pending = null;
+      $('restore-controls').style.display = 'none';
+      $('preview').innerHTML = '';
+      $('file-name').textContent = '';
+      render();
+    } catch (err) {
+      show($('import-msg'), 'err', 'Restore failed: ' + err.message +
+           '. Your safety copy was downloaded, so you can restore it from there.');
+    }
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

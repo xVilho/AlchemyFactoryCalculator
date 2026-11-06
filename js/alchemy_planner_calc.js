@@ -220,11 +220,20 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
 
     // Fertilizer use (Nursery, per machine)
     let fertItemsPerMachine = 0;
+    const fertByItem = {}; // fertilizer item -> items/min per machine (the part of that input port spent as nutrients)
     if (nutrientCost > 0) {
         const totalNutrientsPerMinPerMachine = batchesPerMinPerMachine * nutrientCost;
-        const fertDef = DB.items[plannerEnergy().fert] || { nutrientValue: 144 };
+        const fertName = plannerEnergy().fert;
+        const fertDef = DB.items[fertName] || { nutrientValue: 144 };
         const grossFertVal = fertDef.nutrientValue * (1 + lvlFert * 0.10);
         fertItemsPerMachine = totalNutrientsPerMinPerMachine / grossFertVal;
+        if (fertName && fertItemsPerMachine > 0) {
+            // The fertilizer is a real input port too, so it can be wired to the recipe that makes it.
+            fertByItem[fertName] = fertItemsPerMachine;
+            const existing = inputsPerMachine.find(p => p.item === fertName);
+            if (existing) existing.rate += fertItemsPerMachine;
+            else inputsPerMachine.push({ item: fertName, rate: fertItemsPerMachine });
+        }
     }
 
     // Gold cost: only for recipes without inputs (Purchasing Portal / Bank Portal etc.)
@@ -241,7 +250,7 @@ function plannerGetRecipeRates(recipeId, recipeModifiers) {
         goldCostPerMachine = mainOutRate * unitPrice;
     }
 
-    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, heatByItem, needsHeat, fertItemsPerMachine, goldCostPerMachine, errorCode: '' };
+    return { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, heatByItem, needsHeat, fertItemsPerMachine, fertByItem, goldCostPerMachine, errorCode: '' };
 }
 
 /**
@@ -265,6 +274,8 @@ function computeNodePorts(node) {
     Object.entries(rates.heatByItem || {}).forEach(([item, r]) => { result.heatByItem[item] = r * mc; });
     result.needsHeat = !!rates.needsHeat || result.heatItemsPerMin > 0;
     result.fertItemsPerMin = rates.fertItemsPerMachine * mc;
+    result.fertByItem = {};
+    Object.entries(rates.fertByItem || {}).forEach(([item, r]) => { result.fertByItem[item] = r * mc; });
     result.goldCostPerMin = rates.goldCostPerMachine * mc;
     return result;
 }
@@ -298,14 +309,10 @@ function plannerGetModuleRates(moduleId) {
         if (!plan) return {...result, errorCode: 'Missing Reference'};
         if (getPlannerModulesUsedBy(moduleId).hasCycle) return {...result, errorCode: 'Circular Reference'};
 
-        // The module computes with its own energy settings. Its fuel is a real input port (exposed below
-        // through inputShortage), so heat stays per fuel item; fertilizer is converted into the calling
-        // plan's fertilizer (same nutrients, different item).
-        const outer = plannerEnergy();
-        const inner = plannerEnergyOf(plan.data);
+        // The module computes with its own energy settings. Its fuel and fertilizer are real input ports
+        // (exposed below through inputShortage), so heat and nutrients stay per item.
         const base = _computeFlowsForPlanData(plan);
         if (!base) return {...result, errorCode: 'Missing Reference'};
-        const fertRatio = (DB.items[inner.fert]?.nutrientValue || 144) / (DB.items[outer.fert]?.nutrientValue || 144);
 
         return {
             recipe: null,
@@ -313,7 +320,8 @@ function plannerGetModuleRates(moduleId) {
             outputsPerMachine: Object.entries(base.outputSurplus).map(([item, qty]) => ({ item, rate: qty })),
             heatItemsPerMachine: base.heatTotal,
             heatByItem: base.heatByItem,
-            fertItemsPerMachine: base.fertTotal * fertRatio,
+            fertItemsPerMachine: base.fertTotal,
+            fertByItem: base.fertByItem,
             goldCostPerMachine: base.goldCostTotal,
             errorCode: ''
         };
@@ -337,12 +345,13 @@ function _computeFlowsForPlanData(plan) {
     const inputShortage = {};
     const outputSurplus = {};
     let heatTotal = 0, fertTotal = 0, goldCostTotal = 0;
-    const heatByItem = {};
+    const heatByItem = {}, fertByItem = {};
 
     Object.values(flow.nodePortsCache).forEach(ports => {
         heatTotal += ports.heatItemsPerMin || 0;
         Object.entries(ports.heatByItem || {}).forEach(([item, r]) => { heatByItem[item] = (heatByItem[item] || 0) + r; });
         fertTotal += ports.fertItemsPerMin || 0;
+        Object.entries(ports.fertByItem || {}).forEach(([item, r]) => { fertByItem[item] = (fertByItem[item] || 0) + r; });
         goldCostTotal += ports.goldCostPerMin || 0;
     });
 
@@ -356,7 +365,7 @@ function _computeFlowsForPlanData(plan) {
         else inputShortage[item] = (inputShortage[item] || 0) + val;
     });
 
-    return { inputShortage: inputShortage, outputSurplus: outputSurplus, heatTotal: heatTotal, heatByItem: heatByItem, fertTotal: fertTotal, goldCostTotal: goldCostTotal };
+    return { inputShortage: inputShortage, outputSurplus: outputSurplus, heatTotal: heatTotal, heatByItem: heatByItem, fertTotal: fertTotal, fertByItem: fertByItem, goldCostTotal: goldCostTotal };
 }
 
 
@@ -1199,6 +1208,9 @@ function encapsulatePlannerSelectedNodes() {
 
     // 4. Create the new plan and move the nodes + internal edges into it (deep copy)
     const newPlan = _createPlan(planName);
+    newPlan.autoModule = true; // Made by Encapsulate: undo/unpack remove it again when nothing uses it
+    // Same heating device/fuel/fertilizer as the parent, so heating ports (and their lines) keep the same item
+    newPlan.data.energy = JSON.parse(JSON.stringify(plannerEnergyOf(plannerState)));
     newPlan.data.nodes = {};
     selectedIds.forEach(id => {
         const node = plannerState.nodes[id];
@@ -1246,6 +1258,123 @@ function encapsulatePlannerSelectedNodes() {
     savePlannerState();       // Record this edit of the (original) plan in undo history
     savePlannerLibraryMeta(); // Make sure the new plan is written to localStorage
     renderPlannerToolbarSelect(); // So the dropdown can select the new plan
+}
+
+/* Auto-created module plans that undo/unpack took out of the library, kept so redo/undo can bring them back */
+const _plannerModuleStash = {};
+
+/**
+ * Keep Encapsulate-made module plans in step with undo/redo: bring back stashed plans that a module node
+ * references again, and stash auto-made plans that no module node references any more.
+ */
+function plannerSyncAutoModules() {
+    let changed = false;
+    for (let pass = 0; pass < 5; pass++) { // Nested modules may need a few passes
+        const referenced = new Set();
+        Object.values(plannerLibrary.plans).forEach(p => Object.values(p.data?.nodes || {}).forEach(n => { if (n.moduleId) referenced.add(n.moduleId); }));
+        let passChanged = false;
+        referenced.forEach(id => {
+            if (!plannerLibrary.plans[id] && _plannerModuleStash[id]) {
+                plannerLibrary.plans[id] = _plannerModuleStash[id];
+                if (!plannerLibrary.planOrder.includes(id)) plannerLibrary.planOrder.push(id);
+                delete _plannerModuleStash[id];
+                passChanged = true;
+            }
+        });
+        Object.values(plannerLibrary.plans).forEach(p => {
+            if (!p.autoModule || referenced.has(p.id) || p.id === plannerLibrary.activePlanId) return;
+            _plannerModuleStash[p.id] = p;
+            delete plannerLibrary.plans[p.id];
+            plannerLibrary.planOrder = plannerLibrary.planOrder.filter(id => id !== p.id);
+            passChanged = true;
+        });
+        if (!passChanged) break;
+        changed = true;
+    }
+    return changed;
+}
+
+/** How many module nodes, across all plans, use this plan */
+function plannerModuleNodeUseCount(planId) {
+    let count = 0;
+    Object.values(plannerLibrary.plans).forEach(p => Object.values(p.data?.nodes || {}).forEach(n => { if (n.moduleId === planId) count++; }));
+    return count;
+}
+
+/**
+ * Unpack a module node: copy the module's nodes and lines back into this plan where the module sits,
+ * scale machine counts by the module's multiplier, reconnect the outside lines to the inner ports
+ * that needed them, then remove the module node (and its plan, if Encapsulate made it and nothing else uses it).
+ */
+function unpackPlannerModuleNode(nodeId, deletePlan = false) {
+    const modNode = plannerState.nodes[nodeId];
+    const plan = modNode && plannerLibrary.plans[modNode.moduleId];
+    if (!plan || !plan.data) return;
+    // Delete the plan too: only when no other module node uses it. Marking it auto-made lets the sync
+    // below put it away, and undo brings it back.
+    if (deletePlan && plannerModuleNodeUseCount(plan.id) <= 1) plan.autoModule = true;
+    const inner = plan.data;
+    const mult = modNode.machineCount || 1;
+    const innerFlows = plannerResolveFlows(inner);
+
+    // Place the inner layout so its center lands on the module node's position
+    const innerNodes = Object.values(inner.nodes || {});
+    if (innerNodes.length === 0) return;
+    const cx = innerNodes.reduce((a, n) => a + (n.x || 0), 0) / innerNodes.length;
+    const cy = innerNodes.reduce((a, n) => a + (n.y || 0), 0) / innerNodes.length;
+    const offX = (modNode.x || 0) - cx, offY = (modNode.y || 0) - cy;
+
+    const idMap = {};
+    _plannerSelectedNodeIds.clear();
+    innerNodes.forEach(n => {
+        plannerState._nodeSeq = (plannerState._nodeSeq || 0) + 1;
+        const id = 'pnode_' + plannerState._nodeSeq;
+        const copy = JSON.parse(JSON.stringify(n));
+        copy.id = id;
+        copy.x = Math.round((n.x || 0) + offX);
+        copy.y = Math.round((n.y || 0) + offY);
+        if ((copy.recipeId || copy.moduleId) && typeof copy.machineCount === 'number') copy.machineCount *= mult;
+        plannerState.nodes[id] = copy;
+        idMap[n.id] = id;
+        _plannerSelectedNodeIds.add(id);
+    });
+    Object.values(inner.edges || {}).forEach(e => {
+        if (!idMap[e.fromNode] || !idMap[e.toNode]) return;
+        plannerState._edgeSeq = (plannerState._edgeSeq || 0) + 1;
+        const id = 'pedge_' + plannerState._edgeSeq;
+        plannerState.edges[id] = { ...JSON.parse(JSON.stringify(e)), id, fromNode: idMap[e.fromNode], toNode: idMap[e.toNode] };
+    });
+
+    // Inner node that best takes an outside line: the one with the most unconnected rate for that item/direction
+    const pickInner = (item, dir) => {
+        let best = null, bestVal = -1;
+        Object.keys(idMap).forEach(oldId => {
+            // Ports as the node has them in THIS plan (this plan's fuel), so heating lines match even when
+            // the module was made with different energy settings
+            const ports = computeNodePorts(plannerState.nodes[idMap[oldId]]);
+            const list = dir === 'in' ? ports?.inputs : ports?.outputs;
+            if (!list || !list.some(p => p.item === item)) return;
+            const val = innerFlows.portRemaining[plannerPortKey(oldId, item, dir)] ?? 0;
+            if (val > bestVal) { bestVal = val; best = idMap[oldId]; }
+        });
+        return best;
+    };
+    Object.values(plannerState.edges).forEach(e => {
+        if (e.toNode === nodeId) {
+            const target = pickInner(e.item, 'in');
+            if (target) e.toNode = target; else delete plannerState.edges[e.id];
+        } else if (e.fromNode === nodeId) {
+            const source = pickInner(e.item, 'out');
+            if (source) e.fromNode = source; else delete plannerState.edges[e.id];
+        }
+    });
+
+    delete plannerState.nodes[nodeId];
+    plannerSyncAutoModules(); // Drops the module's plan if Encapsulate made it and nothing else uses it
+    renderPlanner();
+    savePlannerState();
+    savePlannerLibraryMeta();
+    renderPlannerToolbarSelect();
 }
 
 function plannerGetPortalRates(node) {

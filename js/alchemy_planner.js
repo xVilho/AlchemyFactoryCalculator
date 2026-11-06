@@ -77,7 +77,8 @@ let plannerState = null;
 let _plannerSettings = {
     viewport: { x: 0, y: 0, zoom: 1 },
     gridSize: 40,
-    edgeStyle: 0,   // 0 = animated dash (default), 1 = static chevron
+    edgeStyle: 2,   // 0 = animated dash, 1 = static chevron, 2 = solid (default, UE5 Blueprint style)
+    edgeLabels: true, // true = rate labels always visible, false = only while hovering a line
     summaryCollapsed: false,
     summarySectionCollapsed: {
         cost: false,
@@ -94,7 +95,7 @@ let _plannerSelectMode = false;
 let _plannerSelectedNodeIds = new Set();
 const PLANNER_ZOOM_MIN = 0.2;
 const PLANNER_ZOOM_MAX = 3;
-const PLANNER_GRID_STEPS = [40, 20, 0];
+const PLANNER_GRID_STEPS = [40, 20, 10, 0];
 
 /** Per-plan viewport cache (in memory for this session only, not written to localStorage).
  *  key: planId -> { x, y, zoom }. Remembers where you left each plan when switching between plans. */
@@ -129,6 +130,7 @@ function initPlannerPage() {
     updatePlannerGridButton();
     updatePlannerGridBackground();    
     updatePlannerEdgeStyleButton();
+    updatePlannerEdgeLabelsToggle();
     updatePlannerUndoRedoButtons();
 }
 
@@ -144,13 +146,15 @@ function loadPlannerSettings() {
         };
 
         _plannerSettings.gridSize = saved.gridSize ?? 0;
-        _plannerSettings.edgeStyle = saved.edgeStyle ?? 0;
+        _plannerSettings.edgeStyle = saved.edgeStyle ?? 2;
+        _plannerSettings.edgeLabels = saved.edgeLabels ?? true;
 
         // Read the summary collapsed state
         _plannerSettings.summaryCollapsed = saved.summaryCollapsed ?? false;
         _plannerSettings.summarySectionCollapsed = {
             cost: saved.summarySectionCollapsed?.cost ?? false,
             heating: saved.summarySectionCollapsed?.heating ?? false,
+            fert: saved.summarySectionCollapsed?.fert ?? false,
             output: saved.summarySectionCollapsed?.output ?? false,
             input: saved.summarySectionCollapsed?.input ?? false,
             machines: saved.summarySectionCollapsed?.machines ?? true
@@ -159,7 +163,8 @@ function loadPlannerSettings() {
         _plannerSettings = {
             viewport: { x: 0, y: 0, zoom: 1 },
             gridSize: 0,
-            edgeStyle: 0,
+            edgeStyle: 2,
+            edgeLabels: true,
             summaryCollapsed: false,
             summarySectionCollapsed: {
                 cost: false,
@@ -292,6 +297,7 @@ function _restorePlannerHistorySnapshot(planId, hist) {
     plannerLibrary.plans[planId].updatedAt = Date.now();
     plannerState = restored;
     _plannerLastFlows = null;
+    const modulesChanged = plannerSyncAutoModules(); // Encapsulate/unpack: bring back or put away their module plan
 
     // Selection is transient UI state and isn't part of history; just prune ids
     // that no longer exist in the restored snapshot so they don't linger forever.
@@ -305,6 +311,7 @@ function _restorePlannerHistorySnapshot(planId, hist) {
     applyPlannerViewportTransform();
     updatePlannerUndoRedoButtons();
     savePlannerLibraryMeta(); // Restoring isn't a new edit, so don't push history
+    if (modulesChanged) renderPlannerToolbarSelect();
 }
 
 function plannerUndo() {
@@ -571,9 +578,12 @@ function attachPlannerKeyboardShortcuts() {
     canvas.addEventListener('mouseleave', () => _plannerCanvasHovered = false);
 
     document.addEventListener('keydown', (e) => {
-        if (!_plannerCanvasHovered) return;
         const tag = (e.target.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea') return;
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+        // Undo/redo work anywhere on the Planner tab (e.g. right after clicking a toolbar button)
+        const isUndoRedo = (e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase());
+        const plannerVisible = canvas.offsetParent !== null && ![...document.querySelectorAll('.modal-overlay')].some(m => m.style.display === 'flex');
+        if (!_plannerCanvasHovered && !(isUndoRedo && plannerVisible)) return;
 
         if (e.key === '+' || e.key === '=') { e.preventDefault(); plannerZoomIn(); }
         else if (e.key === '-' || e.key === '_') { e.preventDefault(); plannerZoomOut(); }
@@ -640,8 +650,15 @@ function updatePlannerGridBackground() {
     canvas.style.backgroundPosition = `${_plannerSettings.viewport.x}px ${_plannerSettings.viewport.y}px`;
 }
 
+const PLANNER_EDGE_STYLES = {
+    2: { glyph: '━', title: 'Line Style: Solid' },
+    0: { glyph: '⇢', title: 'Line Style: Dashed (animated)' },
+    1: { glyph: '⋙', title: 'Line Style: Arrows (static)' }
+};
+
+/** Cycle the line style: solid -> dashed -> arrows -> solid */
 function togglePlannerEdgeStyle() {
-    _plannerSettings.edgeStyle = _plannerSettings.edgeStyle ? 0 : 1;
+    _plannerSettings.edgeStyle = { 2: 0, 0: 1, 1: 2 }[_plannerSettings.edgeStyle] ?? 2;
     updatePlannerEdgeStyleButton();
     renderPlannerEdges(_plannerLastFlows || plannerResolveFlows());
     savePlannerSettings();
@@ -650,11 +667,23 @@ function togglePlannerEdgeStyle() {
 function updatePlannerEdgeStyleButton() {
     const btn = document.getElementById('planner-edge-style-btn');
     if (!btn) return;
-    const isChevron = _plannerSettings.edgeStyle === 1;
-    btn.textContent = isChevron ? '⋙' : '⇢';
-    btn.title = isChevron
-        ? 'Edge Style: Arrow (static)'
-        : 'Edge Style: Dashed (animated)';
+    const style = PLANNER_EDGE_STYLES[_plannerSettings.edgeStyle] || PLANNER_EDGE_STYLES[2];
+    btn.textContent = style.glyph;
+    btn.title = style.title + ' (click to change)';
+}
+
+/** Rate labels on lines: always visible, or only while hovering the line */
+function setPlannerEdgeLabels(visible) {
+    _plannerSettings.edgeLabels = !!visible;
+    updatePlannerEdgeLabelsToggle();
+    savePlannerSettings();
+}
+
+function updatePlannerEdgeLabelsToggle() {
+    const cb = document.getElementById('planner-edge-labels-cb');
+    if (cb) cb.checked = _plannerSettings.edgeLabels !== false;
+    const svg = document.getElementById('planner-svg-layer');
+    if (svg) svg.classList.toggle('labels-on-hover', _plannerSettings.edgeLabels === false);
 }
 
 function plannerFitToView(nodeIds = []) {
@@ -1193,10 +1222,15 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
     // Heating fuel / Steam on an input: mark the port so it's clear it feeds the heating
     const heatPart = dir === 'in' ? ((flows && flows.nodePortsCache[nodeId]?.heatByItem?.[port.item]) || 0) : 0;
     const isHeatPort = heatPart > 0 || (dir === 'in' && port.item === 'Steam' && flows?.nodePortsCache[nodeId]?.needsHeat);
+    const fertPart = dir === 'in' ? ((flows && flows.nodePortsCache[nodeId]?.fertByItem?.[port.item]) || 0) : 0;
+    const isFertPort = fertPart > 0;
     const name = `<span class="planner-port-name">${port.item}</span>`;
     const rate = `<span class="planner-port-rate">${formatVal(port.rate)}</span>`;
-    const title = isHeatPort ? `${port.item}: heating${heatPart > 0 && heatPart < port.rate - 0.0001 ? ` (${formatVal(heatPart)}/m of it)` : ''}` : port.item;
-    if (dir === 'in') return `<div class="planner-port planner-port-in ${rateClass}${isHeatPort ? ' planner-port-heat' : ''}" title="${title}">${badgeHtml}${dot}${rate}${icon}${name}</div>`;
+    let title = port.item;
+    if (isHeatPort) title = `${port.item}: heating${heatPart > 0 && heatPart < port.rate - 0.0001 ? ` (${formatVal(heatPart)}/m of it)` : ''}`;
+    else if (isFertPort) title = `${port.item}: fertilizer${fertPart < port.rate - 0.0001 ? ` (${formatVal(fertPart)}/m of it)` : ''}`;
+    const portKindClass = isHeatPort ? ' planner-port-heat' : (isFertPort ? ' planner-port-fert' : '');
+    if (dir === 'in') return `<div class="planner-port planner-port-in ${rateClass}${portKindClass}" title="${title}">${badgeHtml}${dot}${rate}${icon}${name}</div>`;
     return `<div class="planner-port planner-port-out ${rateClass}" title="${port.item}">${name}${icon}${rate}${dot}${badgeHtml}</div>`;
 }
 
@@ -1207,11 +1241,11 @@ function renderPlannerHeatFertHtml(ports, node) {
         const fuelDef = DB.items[fuelName] || {};
         html += `<span class="heat-tag" title="${fuelName} burned for heat (included in the ${fuelName} input)">${t('Heat', 'ui')} ${formatVal(rate)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"></span>`;
     });
-    if (ports.fertItemsPerMin > 0.001) {
-        const fertName = plannerEnergy().fert;
+    Object.entries(ports.fertByItem || {}).forEach(([fertName, rate]) => {
+        if (!(rate > 0.001)) return;
         const fertDef = DB.items[fertName] || {};
-        html += `<span class="bio-tag">-${formatVal(ports.fertItemsPerMin)}/m <img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small" title="${fertName}"></span>`;
-    }
+        html += `<span class="bio-tag" title="${fertName} spent as nutrients (included in the ${fertName} input)">${t('Fert', 'ui')} ${formatVal(rate)}/m <img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small"></span>`;
+    });
     if (ports.goldCostPerMin > 0.001) {
         html += `<span class="gold-tag">-${formatVal(ports.goldCostPerMin)}/m <img src="img/copper.png" class="item-icon-small"></span>`;
     }
@@ -1527,6 +1561,16 @@ function flashPlannerLinkFeedback(sourceNodeId, affectedNodeIds) {
 
 function attachPlannerNodeDrag(wrap, node) {
     const header = wrap.querySelector('.planner-node-header');
+    // Double-click the title bar opens Node Settings (modules open their plan instead; notes and waypoints have no settings)
+    const hasSettings = !node.moduleId && node.kind !== 'note' && node.kind !== 'waypoint';
+    if (hasSettings) {
+        header.addEventListener('dblclick', (e) => {
+            if (e.target.closest('button, input, textarea, select')) return;
+            if (node.kind === 'portal' && e.target.closest('.planner-node-title')) return; // Portal title click picks the item
+            e.stopPropagation();
+            openPlannerNodeModal(node.id);
+        });
+    }
     header.addEventListener('pointerdown', (e) => {
         if (e.target.closest('button, input, textarea')) return;
 
@@ -1696,6 +1740,18 @@ function _plannerBuildChevronPath(p1, c1, c2, p2, spacing = 9, size = 5) {
 
 /** True if the edge ends at a heating input (fuel burned for heat, or Steam into a heated machine),
  *  following waypoints/portals downstream so the whole fuel line is marked. */
+/** True when the line ends (directly or through waypoints/portals) in a fertilizer port */
+function plannerEdgeFeedsFert(edge, flows, seen = new Set()) {
+    if (seen.has(edge.id)) return false;
+    seen.add(edge.id);
+    const toNode = plannerState.nodes[edge.toNode];
+    if (!toNode) return false;
+    if (toNode.kind === 'waypoint' || toNode.kind === 'portal') {
+        return Object.values(plannerState.edges).some(e => e.fromNode === toNode.id && e.item === edge.item && plannerEdgeFeedsFert(e, flows, seen));
+    }
+    return (flows.nodePortsCache[toNode.id]?.fertByItem?.[edge.item] || 0) > 0;
+}
+
 function plannerEdgeFeedsHeat(edge, flows, seen = new Set()) {
     if (seen.has(edge.id)) return false;
     seen.add(edge.id);
@@ -1737,8 +1793,8 @@ function plannerWaypointDirections() {
         if (ins.length && outs.length) { const a = mean(ins), b = mean(outs); v = { x: b.x - a.x, y: b.y - a.y }; }
         else if (ins.length && here) { const a = mean(ins); v = { x: here.x - a.x, y: here.y - a.y }; }
         else if (outs.length && here) { const b = mean(outs); v = { x: b.x - here.x, y: b.y - here.y }; }
-        const len = v ? Math.hypot(v.x, v.y) : 0;
-        dirs[n.id] = len > 1 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };
+        // Reroute knots (UE5 style): the line always passes through horizontally, flipping only when the flow runs right-to-left
+        dirs[n.id] = { x: (v && v.x < 0) ? -1 : 1, y: 0 };
     });
     return dirs;
 }
@@ -1749,6 +1805,7 @@ function renderPlannerEdges(flows) {
     const wpDir = plannerWaypointDirections();
     const beltSpeed = getBeltSpeed(DB.settings.lvlBelt || 0);
     const useChevron = _plannerSettings.edgeStyle === 1;
+    const useSolid = _plannerSettings.edgeStyle === 2;
     let html = '';
 
     Object.values(plannerState.edges).forEach(edge => {
@@ -1770,12 +1827,12 @@ function renderPlannerEdges(flows) {
         // Build the line path for the current mode
         const linePathHtml = useChevron
             ? `<path class="planner-edge-chevrons" d="${_plannerBuildChevronPath(p1, c1, c2, p2, 9, 5)}"></path>`
-            : `<path class="planner-edge-line" d="${d}"></path>`;
+            : `<path class="planner-edge-line${useSolid ? ' solid' : ''}" d="${d}"></path>`;
 
         const beltCount = !itemDef.liquid ? (flow / beltSpeed) : null;
         // edge.color is now set as the group's color and picked up by stroke: currentColor
         // Default color: fuel red for lines feeding heating, otherwise the CSS accent (green)
-        const edgeColor = edge.color || (plannerEdgeFeedsHeat(edge, flows) ? 'var(--fuel)' : '');
+        const edgeColor = edge.color || (plannerEdgeFeedsHeat(edge, flows) ? 'var(--fuel)' : (plannerEdgeFeedsFert(edge, flows) ? 'var(--bio)' : ''));
         const colorStyle = edgeColor ? ` style="color:${edgeColor};"` : '';
         const labelStyle = edgeColor ? ` style="border-left:3px solid ${edgeColor};"` : '';
         const beltArg = beltCount !== null ? beltCount : 'null';

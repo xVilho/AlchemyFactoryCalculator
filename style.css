@@ -919,6 +919,8 @@ button.planner-crumb:hover { background: rgba(255,255,255,0.08); text-decoration
 .planner-port-rate { color: #fff; font-weight: bold; flex-shrink: 0; }
 .planner-port-heat > .planner-port-name { color: var(--fuel, #ff7043); }
 .planner-port-heat > .planner-port-dot { box-shadow: 0 0 0 2px var(--fuel, #ff7043); }
+.planner-port-fert > .planner-port-name { color: var(--bio, #76ff03); }
+.planner-port-fert > .planner-port-dot { box-shadow: 0 0 0 2px var(--bio, #76ff03); }
 .planner-port-empty { color: #555; font-style: italic; font-size: 0.8em; padding: 2px 12px; }
 
 .planner-port-dot {
@@ -1006,6 +1008,17 @@ button.planner-crumb:hover { background: rgba(255,255,255,0.08); text-decoration
     fill: none; stroke: currentColor; stroke-width: 2.5;
     stroke-dasharray: 6 5; animation: planner-flow-dash 0.6s linear infinite;
 }
+
+/* Solid line (edgeStyle = 2, UE5 Blueprint style) */
+.planner-edge-line.solid { stroke-width: 3; stroke-dasharray: none; animation: none; stroke-linecap: round; }
+.planner-edge-group:hover .planner-edge-line.solid { stroke-width: 4; }
+
+/* Rate labels shown only while hovering their line */
+.planner-svg-layer.labels-on-hover .planner-edge-label { visibility: hidden; }
+.planner-svg-layer.labels-on-hover .planner-edge-group:hover .planner-edge-label { visibility: visible; }
+
+.planner-labels-toggle { padding: 0; }
+.planner-labels-toggle input { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: var(--accent); }
 
 /* Static chevron arrows (edgeStyle = 1) */
 .planner-edge-chevrons {

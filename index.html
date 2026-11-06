@@ -715,7 +715,11 @@
 
                 <div class="planner-view-controls">
                     <button id="planner-grid-btn" class="planner-view-btn" onclick="plannerCycleGridSnap()" title="Grid Snap">⊞</button>
-                    <button id="planner-edge-style-btn" class="planner-view-btn" onclick="togglePlannerEdgeStyle()" title="Edge Style: Dashed (animated)">⇢</button>
+                    <button id="planner-edge-style-btn" class="planner-view-btn" onclick="togglePlannerEdgeStyle()" title="Line Style: Solid (click to change)">━</button>
+                    <div class="planner-view-btn planner-labels-toggle" title="Show rate labels on lines (unticked: show on hover only)"
+                         onclick="if (event.target === this) { const cb = this.firstElementChild; cb.checked = !cb.checked; setPlannerEdgeLabels(cb.checked); }">
+                        <input type="checkbox" id="planner-edge-labels-cb" checked onchange="setPlannerEdgeLabels(this.checked)">
+                    </div>
                     <button class="planner-view-btn" onclick="plannerZoomIn()" title="Zoom In (+)">+</button>
                     <button class="planner-view-btn" onclick="plannerZoomOut()" title="Zoom Out (-)">−</button>
                     <button class="planner-view-btn" onclick="plannerFitToView()" title="Fit to View (F)">⤢</button>

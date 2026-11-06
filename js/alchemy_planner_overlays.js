@@ -533,6 +533,16 @@ function renderPlannerNodeModalBody(nodeId) {
             <button class="split-btn" style="width:100%;" onclick="closeModal('planner-node-modal'); enterPlannerModule('${node.moduleId}')">
                 ${t('Open Module', 'ui')}
             </button>
+            <button class="split-btn" style="width:100%; margin-top:6px;" title="Put the module's nodes back into this plan (Ctrl+Z undoes)" onclick="closeModal('planner-node-modal'); unpackPlannerModuleNode('${node.id}')">
+                ${t('Unpack Module', 'ui')}
+            </button>
+            ${plannerModuleNodeUseCount(node.moduleId) <= 1
+                ? `<button class="split-btn" style="width:100%; margin-top:6px;" title="Unpack, then delete the module's plan from the plan list (Ctrl+Z undoes)" onclick="closeModal('planner-node-modal'); unpackPlannerModuleNode('${node.id}', true)">
+                ${t('Unpack Module & Delete Plan', 'ui')}
+            </button>`
+                : `<button class="split-btn" style="width:100%; margin-top:6px;" disabled title="This plan is also used by ${plannerModuleNodeUseCount(node.moduleId) - 1} other module node(s), so it can't be deleted">
+                ${t('Unpack Module & Delete Plan', 'ui')}
+            </button>`}
         </div>
     ` : ``;
 
@@ -1265,9 +1275,9 @@ function buildPlannerRateTooltipHtml(rates) {
     Object.entries(rates.heatByItem || {}).forEach(([fuelName, r]) => {
         if (r > 0.0001) html += rowHtml(fuelName, -r, '#ff5722');
     });
-    if (rates.fertItemsPerMachine > 0.0001) {
-        html += rowHtml(plannerEnergy().fert, -rates.fertItemsPerMachine, '#76ff03');
-    }
+    Object.entries(rates.fertByItem || {}).forEach(([fertName, r]) => {
+        if (r > 0.0001) html += rowHtml(fertName, -r, '#76ff03');
+    });
     if (rates.goldCostPerMachine > 0.0001) {
         html += `<div class="planner-rate-tooltip-row">
             <span class="planner-rate-tooltip-qty" style="color:var(--gold)">-${formatVal(rates.goldCostPerMachine)}</span>
@@ -1461,7 +1471,7 @@ function plannerItemUnitPrice(item) {
 function computePlannerSummaryStats(flows) {
     const machineCounts = {};
     let heatTotal = 0, fertTotal = 0, goldTotal = 0, steamTotal = 0;
-    const heatByItem = {};
+    const heatByItem = {}, fertByItem = {};
 
     Object.values(plannerState.nodes).forEach(node => {
         const ports = flows.nodePortsCache[node.id];
@@ -1473,6 +1483,7 @@ function computePlannerSummaryStats(flows) {
         heatTotal += ports.heatItemsPerMin || 0;
         Object.entries(ports.heatByItem || {}).forEach(([item, r]) => { heatByItem[item] = (heatByItem[item] || 0) + r; });
         fertTotal += ports.fertItemsPerMin || 0;
+        Object.entries(ports.fertByItem || {}).forEach(([item, r]) => { fertByItem[item] = (fertByItem[item] || 0) + r; });
         goldTotal += ports.goldCostPerMin || 0;
         if (node.kind !== 'waypoint' && node.kind !== 'portal') {
             steamTotal += (ports.inputs.find(p => p.item === 'Steam') || {}).rate || 0;
@@ -1496,7 +1507,7 @@ function computePlannerSummaryStats(flows) {
         if (def && def.buyPrice) goldTotal += def.buyPrice * qty;
     });
 
-    return { machineCounts, heatTotal, heatByItem, fertTotal, steamTotal, outputSurplus, inputShortage, goldTotal };
+    return { machineCounts, heatTotal, heatByItem, fertTotal, fertByItem, steamTotal, outputSurplus, inputShortage, goldTotal };
 }
 
 function renderPlannerSummary(flows) {
@@ -1531,11 +1542,6 @@ function renderPlannerSummary(flows) {
     if (stats.goldTotal > 0.0001) {
         costRows += `<div class="planner-summary-row"><img src="img/copper.png" class="item-icon-small"><span>${t('Coin', 'ui')}</span><span class="planner-summary-val" style="color:var(--gold);">${Math.ceil(stats.goldTotal).toLocaleString()}/m</span></div>`;
     }
-    if (stats.fertTotal > 0.0001) {
-        const fertName = plannerEnergy().fert;
-        const fertDef = DB.items[fertName] || {};
-        costRows += `<div class="planner-summary-row"><img src="img/item${fertDef.id ?? 0}.png" class="item-icon-small"><span>${fertName}</span><span class="planner-summary-val" style="color:var(--bio);">${formatVal(stats.fertTotal)}/m</span></div>`;
-    }
     if (!costRows) costRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
 
     // --- Heating: fuel burned (materials) + its coin value ---
@@ -1565,6 +1571,21 @@ function renderPlannerSummary(flows) {
         heatRows += `<div class="planner-summary-row" title="Coin value of the fuel burned for heating per minute (unsupplied Steam valued as ${plannerEnergy().fuel} burned in Steam Boilers)${heatCoinsKnown ? '' : '. Some fuel has no known coin value.'}"><img src="img/copper.png" class="item-icon-small"><span>${t('Coin', 'ui')}${heatCoinsKnown ? '' : ' (partial)'}</span><span class="planner-summary-val" style="color:var(--gold);">≈${Math.ceil(heatCoins).toLocaleString()}/m</span></div>`;
     } else {
         heatRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
+    }
+
+    // --- Fertilizer: nutrients spent by nurseries (materials) + its coin value ---
+    const fertEntries = Object.entries(stats.fertByItem).filter(([, r]) => r > 0.0001).sort((a, b) => b[1] - a[1]);
+    let fertRows = '', fertCoins = 0, fertCoinsKnown = true;
+    fertEntries.forEach(([item, rate]) => {
+        const def = DB.items[item] || {};
+        const price = plannerItemUnitPrice(item);
+        if (price > 0) fertCoins += rate * price; else fertCoinsKnown = false;
+        fertRows += `<div class="planner-summary-row" title="${price > 0 ? `${formatVal(price)} coins each` : 'No coin value known'}"><img src="img/item${def.id ?? 0}.png" class="item-icon-small"><span>${item}</span><span class="planner-summary-val" style="color:var(--bio);">${formatVal(rate)}/m</span></div>`;
+    });
+    if (fertRows) {
+        fertRows += `<div class="planner-summary-row" title="Coin value of the fertilizer spent per minute${fertCoinsKnown ? '' : '. Some fertilizer has no known coin value.'}"><img src="img/copper.png" class="item-icon-small"><span>${t('Coin', 'ui')}${fertCoinsKnown ? '' : ' (partial)'}</span><span class="planner-summary-val" style="color:var(--gold);">≈${Math.ceil(fertCoins).toLocaleString()}/m</span></div>`;
+    } else {
+        fertRows = `<div class="planner-summary-empty">${t('None', 'ui')}</div>`;
     }
 
     // --- Section 2: Machines ---
@@ -1598,6 +1619,7 @@ function renderPlannerSummary(flows) {
         <div class="planner-summary-body">
             ${sectionHtml('cost', t('Total Load', 'ui'), costRows)}
             ${sectionHtml('heating', t('Cost of Heating', 'ui'), heatRows)}
+            ${sectionHtml('fert', t('Cost of Fertilizer', 'ui'), fertRows)}
             ${sectionHtml('output', t('Output', 'ui'), outputRows, outputEntries.length)}
             ${sectionHtml('input', t('Input', 'ui'), inputRows, inputEntries.length)}            
             ${sectionHtml('machines', t('Machines', 'ui'), machineRows, machineEntries.reduce((s, [, c]) => s + c, 0))}

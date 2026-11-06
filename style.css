@@ -899,7 +899,8 @@ button.planner-crumb:hover { background: rgba(255,255,255,0.08); text-decoration
 
 .planner-node-body { padding: 0px 8px 8px 8px; display: flex; flex-direction: column; gap: 4px; position: relative; }
 .planner-ports-row { display: flex; gap: 4px; }
-.planner-ports-col { display: block; flex: 1; min-width: 0; width: 100%; }
+/* Columns start at their content width and share leftover space, so a short input list doesn't take half the node */
+.planner-ports-col { display: block; flex: 1 1 auto; min-width: 0; }
 .planner-ports-in { border-right: 1px dashed #3a3a3a; }
 .planner-ports-out { align-items: flex-end; }
 

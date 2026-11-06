@@ -62,6 +62,7 @@ function init() {
     if(!DB.settings.customCosts) DB.settings.customCosts = {};
     if(!DB.settings.expandCatalystInputs) DB.settings.expandCatalystInputs = { unstable: false, fertile: false, resonant: false, eternal: false };
     if(DB.settings.thermalExtractorHeight === undefined) DB.settings.thermalExtractorHeight = 255;
+    injectAltarRecipes(); // Generate Knowledge Altar decompose recipes at runtime
 
 
     prepareComboboxData();
@@ -207,6 +208,33 @@ function populateSelects() {
         });
     heatingSel.value = DB.settings.selectedHeatingDevice || "Stone Furnace";
     if(!heatingSel.value) heatingSel.value = heatingSel.options[0]?.value || "";
+}
+
+/**
+ * Inject a Knowledge Altar decompose recipe for every decomposable item.
+ * Generated at runtime only (not written to alchemy_db.js).
+ * id: AUTO_GENERATED_ALTAR_{itemId}, outputs left empty.
+ */
+function injectAltarRecipes() {
+    const PREFIX = "AUTO_GENERATED_ALTAR_";
+    DB.recipes = (DB.recipes || []).filter(r => !r.id?.startsWith(PREFIX));
+
+    Object.entries(DB.items).forEach(([name, def]) => {
+        if (!(def.baseCost > 0) || def.liquid || def.virtual || def.id === undefined) return;
+        const decomposeTime = AlchemyCalcEngine.computeDecomposeTime(DB, name);
+        if (!decomposeTime) return;
+
+        // maxStack < 0 (raw materials / relics): only a fraction is consumed per use, same as the cauldron logic
+        const inputQty = (def.maxStack < 0) ? 1 / (-def.maxStack) : 1;
+
+        DB.recipes.push({
+            id: PREFIX + def.id,
+            machine: "Knowledge Altar",
+            inputs: { [name]: inputQty },
+            outputs: {},
+            baseTime: decomposeTime
+        });
+    });
 }
 
 /* ==========================================================================

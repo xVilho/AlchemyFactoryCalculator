@@ -1,7 +1,7 @@
 window.ALCHEMY_DB = {
-    "version": 56,
-    "date": "2026.09.14",
-    "gameVersion": "1.0.4952",
+    "version": 59,
+    "date": "2026.10.17",
+    "gameVersion": "1.1.5024",
     "items": {
         // --- RAW RESOURCES ---
         "Logs": { "id": 1, "category": "Raw Materials", "buyPrice": 200, "maxStack": -200, "heat": 2000, "baseCost": 1, "cauldronCost": 0.8, "paradoxTime": 9.375, "tier": 1 },
@@ -266,7 +266,7 @@ window.ALCHEMY_DB = {
         { "id": "Chamomile", "machine": "Nursery", "buildCost": "Chamomile Seeds", "inputs": {}, "outputs": { "Chamomile": 1 }, "nutrientCost": 720 },
         { "id": "Lavender", "machine": "Nursery", "buildCost": "Lavender Seeds", "inputs": {}, "outputs": { "Lavender": 1 }, "nutrientCost": 2160},
         { "id": "Gentian_Dual", "machine": "Nursery", "buildCost": "Gentian Seeds", "inputs": {}, "outputs": { "Gentian": 1, "Gentian Nectar": 1 }, "nutrientCost": 12000, "sharedOutputs": 2},
-        { "id": "Gentian_Mixture", "machine": "Nursery", "buildCost": "Gentian Seeds", "inputs": {}, "outputs": { "Gentian Mixture": 2 }, "nutrientCost": 12000, "sharedOutputs": 2},        
+        { "id": "Gentian_Mixture", "machine": "Nursery", "buildCost": "Gentian Seeds", "inputs": {}, "outputs": { "Gentian Mixture": 2 }, "nutrientCost": 12000},        
         { "id": "World Tree_Dual", "machine": "World Tree Nursery", "inputs": {}, "outputs": { "World Tree Leaf": 99, "World Tree Core":1 }, "baseTime": 300.0, "nutrientCost": 5970000},
         { "id": "World Tree_Mini", "machine": "Miniature World Tree", "inputs": {}, "outputs": { "World Tree Leaf": 1 }, "baseTime": 3, "nutrientCost": 30000 },
 
@@ -352,7 +352,7 @@ window.ALCHEMY_DB = {
         { "id": "Bandage", "machine": "Assembler", "inputs": { "Linen": 1, "Healing Potion": 2 }, "outputs": { "Bandage": 1 }, "baseTime": 10.0 },
         { "id": "Silver Amulet", "machine": "Assembler", "inputs": { "Silver Ingot": 2, "Lapis Lazuli": 1 }, "outputs": { "Silver Amulet": 1 }, "baseTime": 10.0 },
         { "id": "Pocket Watch", "machine": "Advanced Assembler", "inputs": { "Steel Gear": 2, "Copper Bearing": 2, "Glass": 6 }, "outputs": { "Pocket Watch": 1 }, "baseTime": 12.0 },        
-        { "id": "Moonlit Soap", "machine": "Advanced Blender", "inputs": { "Perfumed Soap Powder": 2, "Moon Tear": 5 }, "outputs": { "Moonlit Soap": 1 }, "baseTime": 10.0 },
+        { "id": "Moonlit Soap", "machine": "Blender", "inputs": { "Perfumed Soap Powder": 2, "Moon Tear": 5 }, "outputs": { "Moonlit Soap": 1 }, "baseTime": 10.0 },
         { "id": "Crown", "machine": "Advanced Assembler", "inputs": { "Gold Ingot": 3, "Ruby": 1, "Sapphire": 1 }, "outputs": { "Crown": 1 }, "baseTime": 15.0 },
 
         // --- FUEL & ENERGY ---
@@ -664,6 +664,17 @@ window.ALCHEMY_DB = {
         { "id": "Pure Gold Dust 2 (Enhanced)", "machine": "Enhanced Grinder", "inputs": { "Gold Ingot": 1 }, "outputs": { "Pure Gold Dust": 1 }, "baseTime": 20.0 },
         { "id": "Volcanic Ash (Enhanced)", "machine": "Enhanced Grinder", "inputs": { "Obsidian": 1 }, "outputs": { "Volcanic Ash": 1 }, "baseTime": 12.0 },
 
+        // --- STACKABLE CRUCIBLE ALTERNATE RECIPES ---
+        // (Heat cost goes from 4 P/s to 6 P/s)
+        { "id": "Quicklime (Stack)", "machine": "Stackable Crucible", "inputs": { "Stone": 1 }, "outputs": { "Quicklime": 1 }, "baseTime": 9.0 },
+        { "id": "Plant Ash (Stack)", "machine": "Stackable Crucible", "inputs": { "Sage": 1 }, "outputs": { "Plant Ash": 1 }, "baseTime": 3.0 },
+        { "id": "Charcoal (Stack)", "machine": "Stackable Crucible", "inputs": { "Plank": 1 }, "outputs": { "Charcoal": 1 }, "baseTime": 4.0 },
+        { "id": "Coke_Alt (Stack)", "machine": "Stackable Crucible", "inputs": { "Coal": 1 }, "outputs": { "Coke": 1 },  "baseTime": 6.0 },
+        { "id": "Iron Ingot 2 (Stack)", "machine": "Stackable Crucible", "inputs": { "Iron Sand": 1 }, "outputs": { "Iron Ingot": 1 }, "baseTime": 6.0 },
+        { "id": "Copper Ingot (Stack)", "machine": "Stackable Crucible", "inputs": { "Copper Powder": 1 }, "outputs": { "Copper Ingot": 1 }, "baseTime": 12.0 },
+        { "id": "Bronze Ingot (Stack)", "machine": "Stackable Crucible", "inputs": { "Impure Copper Powder": 1 }, "outputs": { "Bronze Ingot": 1 }, "baseTime": 12.0 },
+        { "id": "Silver Ingot (Stack)", "machine": "Stackable Crucible", "inputs": { "Silver Powder": 1 }, "outputs": { "Silver Ingot": 1 }, "baseTime": 16.0 },
+        { "id": "Gold Ingot (Stack)", "machine": "Stackable Crucible", "inputs": { "Pure Gold Dust": 1 }, "outputs": { "Gold Ingot": 1 }, "baseTime": 40.0 },
 
         // --- THERMAL EXTRACTOR ALTERNATE RECIPES ---
         // (Production Bonus + 200% when build on height >256)
@@ -675,6 +686,8 @@ window.ALCHEMY_DB = {
 
         // --- VIRTUAL RECIPES ---
         { "id": "Unstable Catalyst (Gentian Mixture)", "machine": "Cauldron", "inputs": { "Gentian Mixture": 1, "Gentian Nectar": 1, "Gentian": 1 }, "outputs": { "Unstable Catalyst": 1 }, "baseTime": 10.3, "heatCost": 148.0 },
-        { "id": "Steam Boiler (High)", "machine": "Steam Boiler", "outputs": { "Steam": 300 }, "baseTime": 2, "heatCost": 3000 }
+        { "id": "Steam Boiler (High)", "machine": "Steam Boiler", "inputs": {}, "outputs": { "Steam": 300 }, "baseTime": 2, "heatCost": 3000 },
+        { "id": "Steam Boiler (Mid)", "machine": "Steam Boiler", "inputs": {}, "outputs": { "Steam": 100 }, "baseTime": 4, "heatCost": 500 },
+        { "id": "Steam Boiler (Low)", "machine": "Steam Boiler", "inputs": {}, "outputs": { "Steam": 30 }, "baseTime": 6, "heatCost": 100 }
     ]
 };

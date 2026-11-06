@@ -1077,7 +1077,7 @@ function pickCustomRecipeInput(recipeId, forItem) {
 }
 
 function openDrillDown(item, rate) {
-    const url = `index.html?item=${encodeURIComponent(item)}&rate=${rate.toFixed(2)}`;
+    const url = `index.html?item=${encodeURIComponent(item)}&rate=${Number(rate)}`;
     window.open(url, '_blank');
 }
 

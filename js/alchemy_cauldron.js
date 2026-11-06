@@ -318,9 +318,9 @@ function refreshExpandedCauldronCards() {
    ========================================================================== */
 
 function openItemBaseCostModal() {
-    document.getElementById('item-base-cost-modal-title').innerText = '⚙ ' + t('Base Item Cost List', 'ui');
-    document.getElementById('base-cost-heat-label').innerText = '🔥 ' + t('Heat', 'ui') + ' ' + t('Cost', 'ui');
-    document.getElementById('base-cost-fert-label').innerText = '🌱 ' + t('Nutr', 'ui') + ' ' + t('Cost', 'ui');
+    document.getElementById('item-base-cost-modal-title').innerText = t('Base Item Cost List', 'ui');
+    document.getElementById('base-cost-heat-label').innerText = t('Heat', 'ui') + ' ' + t('Cost', 'ui');
+    document.getElementById('base-cost-fert-label').innerText = t('Nutr', 'ui') + ' ' + t('Cost', 'ui');
     //document.getElementById('custom-cost-btn-label-2').innerText = t('Manage Custom Costs', 'ui');
     _renderItemBaseCostRates();
     _populateItemBaseCostCategories();
@@ -512,7 +512,7 @@ function candidateMatchesView(name) {
 function renderCandidatePool() {
     cauldronCatFilter = document.getElementById('cauldron-cat-select').value;
     const sortFlag = document.getElementById('cauldron-sort-by-cost').checked;
-    const cauldronSortDescending = document.getElementById('cauldron-sort-order-btn').innerText === '🔽';
+    const cauldronSortDescending = document.getElementById('cauldron-sort-order-btn').innerText === '▼';
     const container = document.getElementById('candidate-pool');
     container.innerHTML = '';
 
@@ -603,7 +603,7 @@ function applyPreset(poolType) {
 }
 
 function toggleCauldronSortOrder() {
-    document.getElementById('cauldron-sort-order-btn').innerText = document.getElementById('cauldron-sort-order-btn').innerText === '🔽' ? '🔼' : '🔽';
+    document.getElementById('cauldron-sort-order-btn').innerText = document.getElementById('cauldron-sort-order-btn').innerText === '▼' ? '▲' : '▼';
     renderCandidatePool();
 }
 
@@ -1663,7 +1663,7 @@ function renderCauldronFavorites() {
                             ${f.inputs.map(name => 
                                 DB.items[name] 
                                     ? `<img src="img/item${DB.items[name].id}.png" class="item-icon-small">${name}` 
-                                    : `<span style="color:var(--warn);" title="Item name not found">⚠️${name}</span>`
+                                    : `<span style="color:var(--warn);" title="Item name not found">! ${name}</span>`
                             ).join(' + ')}
                         </span>
                         <button class="swap-btn" style="color:var(--warn); border-color:var(--warn);" 

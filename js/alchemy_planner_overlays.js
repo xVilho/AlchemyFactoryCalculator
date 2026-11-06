@@ -16,11 +16,93 @@ function renderPlannerToolbarSelect() {
             const selected = id === plannerLibrary.activePlanId ? 'selected' : '';
             return `<option value="${id}" ${selected}>${_escapeHtml(plan.name)}</option>`;
         }).join('');
+    renderPlannerModuleBreadcrumb(); // Plan names / active plan may have changed
 }
 
-/** Switch the active plan: repoint plannerState and redraw the whole canvas */
-function switchPlannerPlan(planId) {
+/* ==========================================================================
+   SECTION: MODULE NAVIGATION - breadcrumb path + back
+   ========================================================================== */
+
+// Plan ids from where navigation started down to the active plan, e.g. [root, moduleA, moduleB].
+// Entering a module appends to it; switching plans any other way (dropdown, Manage Plans) resets it.
+let _plannerModuleTrail = [];
+// Snapshots of earlier trails, newest last (for the Back button: restores both the plan and its path)
+let _plannerModuleBackStack = [];
+
+const _plannerTrailValid = trail => trail.length > 0 && trail.every(id => plannerLibrary.plans[id]);
+
+/** Drop history that points at deleted plans and make sure the trail ends at the active plan */
+function _normalizePlannerModuleTrail() {
+    const active = plannerLibrary.activePlanId;
+    _plannerModuleBackStack = _plannerModuleBackStack.filter(_plannerTrailValid);
+    if (!_plannerTrailValid(_plannerModuleTrail) || _plannerModuleTrail[_plannerModuleTrail.length - 1] !== active) {
+        _plannerModuleTrail = active ? [active] : [];
+        _plannerModuleBackStack = [];
+    }
+}
+
+/** Switch to the last plan of newTrail, remembering the current trail for Back */
+function _plannerNavigateTrail(newTrail) {
+    _plannerModuleBackStack.push([..._plannerModuleTrail]);
+    if (_plannerModuleBackStack.length > 50) _plannerModuleBackStack.shift();
+    _plannerModuleTrail = newTrail; // Set before switching: switchPlannerPlan redraws the breadcrumb
+    switchPlannerPlan(newTrail[newTrail.length - 1], true);
+}
+
+/** Open a module's plan (double-click on a module node / Load Module), extending the breadcrumb path */
+function enterPlannerModule(moduleId) {
+    if (!plannerLibrary.plans[moduleId] || moduleId === plannerLibrary.activePlanId) return;
+    _normalizePlannerModuleTrail();
+    const existing = _plannerModuleTrail.indexOf(moduleId);
+    _plannerNavigateTrail(existing >= 0 ? _plannerModuleTrail.slice(0, existing + 1) : [..._plannerModuleTrail, moduleId]);
+}
+
+/** Jump to the plan at index i of the breadcrumb path */
+function navigatePlannerModuleTrail(i) {
+    _normalizePlannerModuleTrail();
+    if (i < 0 || i >= _plannerModuleTrail.length - 1) return;
+    _plannerNavigateTrail(_plannerModuleTrail.slice(0, i + 1));
+}
+
+/** Go back to the previously viewed module/plan */
+function plannerModuleBack() {
+    _normalizePlannerModuleTrail();
+    const prev = _plannerModuleBackStack.pop();
+    if (!prev) return;
+    _plannerModuleTrail = prev;
+    switchPlannerPlan(prev[prev.length - 1], true);
+    renderPlannerModuleBreadcrumb(); // In case the plan didn't change (switchPlannerPlan returns early)
+}
+
+/** Draw the "Root › Module A › Module B" bar under the toolbar (hidden when not inside a module) */
+function renderPlannerModuleBreadcrumb() {
+    const bar = document.getElementById('planner-breadcrumb');
+    if (!bar) return;
+    _normalizePlannerModuleTrail();
+    if (_plannerModuleTrail.length <= 1 && _plannerModuleBackStack.length === 0) {
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+        return;
+    }
+    const last = _plannerModuleTrail.length - 1;
+    const crumbs = _plannerModuleTrail.map((id, i) => {
+        const name = _escapeHtml(plannerLibrary.plans[id].name);
+        return i === last
+            ? `<span class="planner-crumb current">${name}</span>`
+            : `<button class="planner-crumb" onclick="navigatePlannerModuleTrail(${i})" title="${t('Go to', 'ui')} ${name}">${name}</button>`;
+    }).join('<span class="planner-crumb-sep">›</span>');
+    const backDisabled = _plannerModuleBackStack.length === 0 ? 'disabled' : '';
+    bar.innerHTML = `
+        <button class="planner-crumb-back" onclick="plannerModuleBack()" ${backDisabled} title="${t('Previous module (Alt+←)', 'ui')}">◀ ${t('Back', 'ui')}</button>
+        <div class="planner-crumb-path">${crumbs}</div>`;
+    bar.style.display = 'flex';
+}
+
+/** Switch the active plan: repoint plannerState and redraw the whole canvas.
+ *  fromModuleNav = true when called by the module navigation above (keeps the breadcrumb path) */
+function switchPlannerPlan(planId, fromModuleNav = false) {
     if (!plannerLibrary.plans[planId] || planId === plannerLibrary.activePlanId) return;
+    if (!fromModuleNav) { _plannerModuleTrail = [planId]; _plannerModuleBackStack = []; }
     // Remember the current plan's viewport for when we switch back
     _plannerViewportCache[plannerLibrary.activePlanId] = { ..._plannerSettings.viewport };
     plannerLibrary.activePlanId = planId;
@@ -258,7 +340,32 @@ function managePlannerDeleteSelected() {
     const id = _plannerManageSelectedId;
     if (!id) return;
     if (!confirm(t('Delete this plan?', 'ui'))) return;
+    _deletePlannerPlan(id);
+    renderPlannerManageList();
+}
 
+/** Toolbar button: delete the plan currently open on the canvas (after confirming) */
+function deletePlannerActivePlan() {
+    const id = plannerLibrary.activePlanId;
+    const plan = plannerLibrary.plans[id];
+    if (!plan) return;
+    const users = getPlannerModulesUsingPlan(id).length;
+    const warn = users > 0 ? `\n\n${t('Warning: used as a module by', 'ui')} ${users} ${t(users === 1 ? 'plan' : 'plans', 'ui')}.` : '';
+    if (!confirm(`${t('Delete plan', 'ui')} "${plan.name}"?${warn}`)) return;
+    // Inside a module: land on the plan we came from instead of the first plan in the list
+    _normalizePlannerModuleTrail();
+    const trail = [..._plannerModuleTrail]; // Copy: _deletePlannerPlan redraws the breadcrumb, which resets the trail
+    const parent = trail.length > 1 ? trail[trail.length - 2] : null;
+    _deletePlannerPlan(id);
+    if (parent && plannerLibrary.plans[parent]) {
+        _plannerModuleTrail = trail.slice(0, -1);
+        _plannerModuleBackStack = [];
+        switchPlannerPlan(parent, true);
+    }
+}
+
+/** Remove plan id from the library; if it was active, switch to the first plan (creating one if none are left) */
+function _deletePlannerPlan(id) {
     delete plannerLibrary.plans[id];
     plannerLibrary.planOrder = plannerLibrary.planOrder.filter(pid => pid !== id);
     delete plannerHistory[id]; // Also clear that plan's undo/redo history
@@ -282,7 +389,6 @@ function managePlannerDeleteSelected() {
     _plannerManageSelectedId = plannerLibrary.activePlanId;
     savePlannerLibraryMeta();
     renderPlannerToolbarSelect();
-    renderPlannerManageList();
 }
 
 /** Export the selected plan as a single .json file (name + data, so importing restores the name) */
@@ -401,7 +507,7 @@ function renderPlannerNodeModalBody(nodeId) {
 
     const titleEl = document.getElementById('planner-node-modal-title');
     if (titleEl) {
-        const label = mainOut || ((node.kind === 'portal' && node.portalItem) ? '🌀 ' + node.portalItem : '');
+        const label = mainOut || ((node.kind === 'portal' && node.portalItem) ? node.portalItem : '');
         titleEl.innerText = t('Node Settings', 'ui') + (label ? ' — ' + label : '');
     }
     
@@ -424,8 +530,8 @@ function renderPlannerNodeModalBody(nodeId) {
     const moduleSectionHtml = node.moduleId ?
     `
         <div class="planner-module-section">
-            <button class="split-btn" style="width:100%;" onclick="switchPlannerPlan('${node.moduleId}')">
-                📦 ${t('Load Module', 'ui')}
+            <button class="split-btn" style="width:100%;" onclick="closeModal('planner-node-modal'); enterPlannerModule('${node.moduleId}')">
+                ${t('Open Module', 'ui')}
             </button>
         </div>
     ` : ``;
@@ -440,7 +546,7 @@ function renderPlannerNodeModalBody(nodeId) {
             <div style="font-size:0.78em; color:#888; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">
                 ${t('Graph Tools', 'ui')}
             </div>
-            <button class="split-btn" style="width:100%;" onclick="plannerAutoBalanceUpstream('${node.id}')">⚖️ Auto-Balance Upstream</button>
+            <button class="split-btn" style="width:100%;" onclick="plannerAutoBalanceUpstream('${node.id}')">⇌ Auto-Balance Upstream</button>
             <button class="split-btn" style="width:100%;" onclick="plannerSelectAllUpstreamNodes('${node.id}')">
                 ▭ ${t('Select All Upstream', 'ui')}
             </button>
@@ -448,7 +554,7 @@ function renderPlannerNodeModalBody(nodeId) {
                 ⇶ ${t('Auto-Layout Upstream', 'ui')}
             </button>
             <button class="split-btn" style="width:100%;" onclick="autoGenerateAllUpstreamNodes('${node.id}')">
-                ⚡ ${t('Populate All Upstream', 'ui')}
+                ⇇ ${t('Populate All Upstream', 'ui')}
             </button>
             <button class="split-btn" style="width:100%;" onclick="removeAllUpsteamNodes('${node.id}')">
                 × ${t('Clear All Upstream', 'ui')}
@@ -862,7 +968,7 @@ function openPlannerEdgeModal(edgeId) {
                         onclick="plannerClearEdgeColor('${edgeId}')">${t('Reset', 'ui')}</button>
                 <div class="push-right"></div>
                 <button class="split-btn" style="margin-top:0px; font-size:0.9em; width:auto;" title="${t('Tip: Alt+click a line to place the dot exactly where you click', 'ui')}"
-                        onclick="closeModal('planner-edge-modal'); plannerInsertWaypointOnEdge('${edgeId}')">📍 ${t('Add Reroute Dot', 'ui')}</button>
+                        onclick="closeModal('planner-edge-modal'); plannerInsertWaypointOnEdge('${edgeId}')">${t('Add Reroute Dot', 'ui')}</button>
                 <button class="reset-btn" style="margin-top:0px; font-size:1em; width: 30%" onclick="deletePlannerEdge('${edgeId}')">${t('Delete Connection', 'ui')}</button>
             </div>            
         </div>
@@ -1017,8 +1123,8 @@ function openPlannerRecipePickerMenu(ctx) {
     panel.innerHTML = `
         <div class="planner-picker-header">${headerText}</div>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
-            <button class="split-btn" style="flex:1;" onclick="choosePlannerWaypointFromPicker()">+ 📍 Waypoint</button>
-            <button class="split-btn" style="flex:1;" onclick="choosePlannerPortalFromPicker()" title="${t(consuming ? 'Send this output to an external portal (sink)' : 'Supply this input from an external portal (source)', 'ui')}">+ 🌀 Portal</button>
+            <button class="split-btn" style="flex:1;" onclick="choosePlannerWaypointFromPicker()">+ Waypoint</button>
+            <button class="split-btn" style="flex:1;" onclick="choosePlannerPortalFromPicker()" title="${t(consuming ? 'Send this output to an external portal (sink)' : 'Supply this input from an external portal (source)', 'ui')}">+ Portal</button>
         </div>
         <input type="text" class="planner-picker-search" placeholder="${t('Search...', 'ui')}"
                oninput="filterPlannerRecipePicker(this.value)">
@@ -1157,7 +1263,7 @@ function buildPlannerRateTooltipHtml(rates) {
     }
     if (html) html += `<div class="planner-rate-tooltip-divider"></div>`;
     Object.entries(rates.heatByItem || {}).forEach(([fuelName, r]) => {
-        if (r > 0.0001) html += rowHtml('🔥 ' + fuelName, -r, '#ff5722');
+        if (r > 0.0001) html += rowHtml(fuelName, -r, '#ff5722');
     });
     if (rates.fertItemsPerMachine > 0.0001) {
         html += rowHtml(plannerEnergy().fert, -rates.fertItemsPerMachine, '#76ff03');
@@ -1487,11 +1593,11 @@ function renderPlannerSummary(flows) {
 
     panel.innerHTML = `
         <div class="planner-summary-header" onclick="togglePlannerSummaryPanel()">
-            <span>☰ ${t('Summary', 'ui')}</span>
+            <span>${t('Summary', 'ui')}</span>
         </div>
         <div class="planner-summary-body">
             ${sectionHtml('cost', t('Total Load', 'ui'), costRows)}
-            ${sectionHtml('heating', '🔥 ' + t('Cost of Heating', 'ui'), heatRows)}
+            ${sectionHtml('heating', t('Cost of Heating', 'ui'), heatRows)}
             ${sectionHtml('output', t('Output', 'ui'), outputRows, outputEntries.length)}
             ${sectionHtml('input', t('Input', 'ui'), inputRows, inputEntries.length)}            
             ${sectionHtml('machines', t('Machines', 'ui'), machineRows, machineEntries.reduce((s, [, c]) => s + c, 0))}
@@ -1523,7 +1629,7 @@ function createPlannerWaypointFromPicker(ctx, kind = 'waypoint', machineCount = 
     plannerState.nodes[newNodeId] = {
         id: newNodeId, kind, portalItem: itemName, machineCount,
         // portals are full-size cards: offset so the card (not its corner) lands at the cursor
-        x: Math.round(isPortal ? (ctx.originDir === 'out' ? ctx.graphX : ctx.graphX - 200) : ctx.graphX),
+        x: Math.round(isPortal ? (ctx.originDir === 'out' ? ctx.graphX : ctx.graphX - 250) : ctx.graphX),
         y: Math.round(isPortal ? ctx.graphY - 20 : ctx.graphY)
     };
 

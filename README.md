@@ -7,24 +7,24 @@ Precisely calculates raw material consumption, machine counts, heat/nutrient loa
 
 ---
 
-## ✨ Features at a Glance
+## Features at a Glance
 
 | Feature | Description |
 |---|---|
-| 🌲 **Production Tree** | Recursive tree from raw ore to finished product, with per-node machine counts and rates |
-| 🔄 **Recipe Switching** | Swap between alternative recipes per node; Advanced Athanor catalyst selection |
-| ♻️ **Byproduct Recycling** | Route byproducts back into the chain to reduce imports |
-| 📦 **Multi-target Mode** | Plan multiple production goals simultaneously with shared infrastructure |
-| 🗺️ **Planner** | Free-form node-graph editor for designing factory layouts, with modules, auto-layout, and live flow resolution |
-| ⚗️ **Cauldron Calculator** | Brute-force cauldron combination search with favorites and DB sync |
-| 📖 **Wiki** | Built-in item and machine database browser with recipe cross-references |
-| 🛠️ **Database Editor** | Edit recipes and items directly in the browser |
-| 💾 **Persistent Storage** | All settings, recipes, and lists auto-saved to browser `localStorage` |
-| 🔗 **Shareable URLs** | Current item and rate are reflected in the URL for easy sharing |
+| **Production Tree** | Recursive tree from raw ore to finished product, with per-node machine counts and rates |
+| **Recipe Switching** | Swap between alternative recipes per node; Advanced Athanor catalyst selection |
+| **Byproduct Recycling** | Route byproducts back into the chain to reduce imports |
+| **Multi-target Mode** | Plan multiple production goals simultaneously with shared infrastructure |
+| **Planner** | Free-form node-graph editor for designing factory layouts, with modules, auto-layout, and live flow resolution |
+| **Cauldron Calculator** | Brute-force cauldron combination search with favorites and DB sync |
+| **Wiki** | Built-in item and machine database browser with recipe cross-references |
+| **Database Editor** | Edit recipes and items directly in the browser |
+| **Persistent Storage** | All settings, recipes, and lists auto-saved to browser `localStorage` |
+| **Shareable URLs** | Current item and rate are reflected in the URL for easy sharing |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 #### Online
 Open [https://starfi5h.github.io/AlchemyFactoryCalculator](https://starfi5h.github.io/AlchemyFactoryCalculator) in any modern browser. No installation required.
@@ -36,7 +36,7 @@ Open [https://starfi5h.github.io/AlchemyFactoryCalculator](https://starfi5h.gith
 
 ---
 
-## 📐 Calculator Tab
+## Calculator Tab
 
 ### Setting a Target
 
@@ -49,9 +49,9 @@ Type an item name into the search box (supports partial match) or click **☰** 
 
 **Multi-target mode**:
 - Add as many target rows as needed; each is independent, and rows can be reordered by dragging the handle.
-- Use **💾 Save List / 📂 Load List** to persist multi-target sets in the browser.
+- Use **Save List / Load List** to persist multi-target sets in the browser.
 - Enable **Self-Fuel** or **Self-Fert** to automatically deduct factory consumption from the net output of the fuel/fertilizer item itself. The engine iterates to a stable equilibrium.
-- **⚡ Fuel/Fert 1-Machine Quick Set** instantly fills the list with two rows (the selected fuel and fertilizer items), each set to a single fully-loaded machine's rate.
+- **Fuel/Fert 1-Machine Quick Set** instantly fills the list with two rows (the selected fuel and fertilizer items), each set to a single fully-loaded machine's rate.
 - If Self-Fuel or Self-Fert cannot converge because supply is too low or the calculation diverges, an equilibrium warning is shown above the production tree.
 
 ### Upgrades
@@ -99,17 +99,17 @@ Rate numbers shown in **red** mean belt capacity is exceeded.
 
 **Controls on each node:**
 - **▼/▶ arrow** — collapse/expand the subtree (state is remembered)
-- **🔄 button** — open the recipe selector to switch production methods
-- **♻️ button** — enable byproduct recycling for that node (appears when a byproduct is consumed elsewhere in the chain)
+- **⇄ button** — open the recipe selector to switch production methods
+- **↺ button** — enable byproduct recycling for that node (appears when a byproduct is consumed elsewhere in the chain)
 - **☐ checkbox** — mark demand as **External Input**; the node will not be produced internally and appears in the External Inputs summary instead
 
-Use **Recycle All / Un-recycle All** at the top of each production chain section to toggle all recyclers at once, and the **💠** icon to expand/collapse the whole first level at once.
+Use **Recycle All / Un-recycle All** at the top of each production chain section to toggle all recyclers at once, and the **◈** icon to expand/collapse the whole first level at once.
 
 Below the tree, a **Common Nodes** section lists any item+machine combination that appears more than once across the chain (e.g. shared intermediates), with links back to every occurrence, and a **Byproducts** section summarises unconsumed byproducts with links to their producers.
 
 ### Switching Recipes & Catalysts
 
-Click **🔄** on any node to open the recipe selector:
+Click **⇄** on any node to open the recipe selector:
 - Choose an alternative recipe (e.g., Athanor vs. Advanced Athanor for Coke).
 - For **Advanced Athanor** recipes, select one or more **catalysts** (Unstable / Fertile / Resonant / Eternal) to change output ratios or input requirements.
 - For the **Paradox Crucible**'s custom-input recipe, pick which item to feed in via the Item Picker.
@@ -146,7 +146,7 @@ The **Send to Planner** button (in the Save/Reset panel) exports the current cal
 
 ---
 
-## 🗺️ Planner Tab
+## Planner Tab
 
 The Planner is a free-form, Satisfactory-Modeler-style node-graph editor: instead of a single recursive tree rooted at one target item, you place recipe nodes freely, wire their input/output ports together, and the tool resolves how much of each item actually flows across every connection.
 
@@ -154,9 +154,9 @@ The Planner is a free-form, Satisfactory-Modeler-style node-graph editor: instea
 
 The Planner can hold multiple independent **plans**, each with its own set of nodes and connections.
 
-- The dropdown in the toolbar switches between plans; **📁 Manage Plans** opens a modal listing every plan.
+- The dropdown in the toolbar switches between plans; **Manage Plans** opens a modal listing every plan, and the red **Delete Plan** button deletes the plan currently open (after a confirmation that also warns if other plans use it as a module).
 - In the manager you can **drag to reorder**, **rename in place** (double-click the name field that appears), **duplicate**, **delete**, or **export** a single plan as a `.json` file. **New Plan** creates a blank plan, and **⭱ Import** loads a previously exported `.json`.
-- **📦 Import as Module** inserts a selected existing plan directly as a module node in the current canvas.
+- **Import as Module** inserts a selected existing plan directly as a module node in the current canvas.
 - Every plan keeps its own **undo/redo history** and remembers the **viewport** (pan/zoom) you last left it at for the current browser session.
 
 ### Canvas Basics
@@ -189,7 +189,7 @@ Opens a modal with:
 
 ### Auto-Generating Upstream Production
 
-The **⚡ button** on a node's machine-count row inspects that node's unmet input demand and auto-creates one upstream node per missing input (using its preferred recipe), sized and pre-connected to exactly cover the shortfall, laid out to the node's left. **Populate All Upstream** (in the Node Settings modal) repeats this recursively until the whole upstream chain has no more shortages, skipping recipes that would recurse into themselves.
+The **lightning-bolt button** on a node's machine-count row inspects that node's unmet input demand and auto-creates one upstream node per missing input (using its preferred recipe), sized and pre-connected to exactly cover the shortfall, laid out to the node's left. **Populate All Upstream** (in the Node Settings modal) repeats this recursively until the whole upstream chain has no more shortages, skipping recipes that would recurse into themselves.
 
 ### Linking Machine Counts
 
@@ -197,15 +197,15 @@ The chain-link button next to a node's machine-count input toggles **Link Mode**
 
 ### Module Nodes
 
-A node can also reference an entire other plan as a **module**: it exposes that plan's *net* unconnected inputs/outputs as its own ports (i.e. whatever that plan doesn't already produce/consume internally), plus its total fuel/fertilizer draw. Its Node Settings modal shows a **📦 Load Module** button that switches the Planner to that referenced plan. The tool detects circular module references and flags them as an error on the node instead of resolving them.
+A node can also reference an entire other plan as a **module**: it exposes that plan's *net* unconnected inputs/outputs as its own ports (i.e. whatever that plan doesn't already produce/consume internally), plus its total fuel/fertilizer draw. **Double-click** a module node (or use **Open Module** in its Node Settings) to open that plan. While inside modules, a path bar under the toolbar shows where you are (e.g. Main › Module A › Module B): click any part of the path to jump there, or use **◀ Back** (Alt+←) to return to the previous module. The tool detects circular module references and flags them as an error on the node instead of resolving them.
 
-Select a group of nodes and click **📦 Encapsulate** to create a new plan from the selection and replace it with a module node. The internal connections are retained inside the new module.
+Select a group of nodes and click **Encapsulate** to create a new plan from the selection and replace it with a module node. The internal connections are retained inside the new module.
 
-Use **🔀 Optimize Port Order** in the lower-right canvas controls to optimize all port orders; dropping a node also performs a single-node port-order optimization.
+Use **⇅ Optimize Port Order** in the lower-right canvas controls to optimize all port orders; dropping a node also performs a single-node port-order optimization.
 
 ### Portal Nodes
 
-The **+ 🌀 Portal** tool adds a portal node for external item movement. Set its item by clicking its title and use **⇄** to switch the visual input/output direction.
+The **+ Portal** tool adds a portal node for external item movement. Set its item by clicking its title and use **⇄** to switch the visual input/output direction.
 
 ### Summary Panel
 
@@ -217,7 +217,7 @@ The Calculator tab's **Send to Planner** button converts its current production 
 
 ---
 
-## ⚗️ Cauldron Tab
+## Cauldron Tab
 
 ### Cauldron Types
 
@@ -239,9 +239,9 @@ Three independent **Profiles** let you store different candidate sets:
 - **Profile 2** — Herb-chain items (auto-generated from herbal production chains)
 - **Profile 3** — Gold/currency-based items
 
-Use **Select All / Deselect All** to bulk-configure the active profile. The **🌿** button resets the pool to a herb-focused preset, and **💰** resets it to a gold/currency-focused preset.
+Use **Select All / Deselect All** to bulk-configure the active profile. The **Herbs** button resets the pool to a herb-focused preset, and **Gold** resets it to a gold/currency-focused preset.
 
-Sort the pool by cauldron cost with **Sort by Value** and toggle ascending/descending with **🔼/🔽**.
+Sort the pool by cauldron cost with **Sort by Value** and toggle ascending/descending with **▲/▼**.
 
 ### Slot Filters & Search
 
@@ -283,7 +283,7 @@ Switch to **Multiple Steps** (next to **Single Step** at the top of the Cauldron
 
 ---
 
-## 📖 Wiki Tab
+## Wiki Tab
 
 Four sub-views accessible from the top navigation:
 
@@ -309,7 +309,7 @@ The table shows the item, units per contract, reward coin type, daily maximum, u
 
 ---
 
-## 🛠️ Database Editor Tab
+## Database Editor Tab
 
 Select a target from the dropdown:
 - **Database** — full item, machine, and recipe data
@@ -322,7 +322,7 @@ Edit the JSON directly in the textarea, then click **Apply Changes** to reload i
 
 ---
 
-## 🔗 URL Parameters
+## URL Parameters
 
 The URL reflects the current state and can be bookmarked or shared:
 
@@ -339,7 +339,7 @@ The URL reflects the current state and can be bookmarked or shared:
 
 ---
 
-## ⚙️ Reset Options
+## Reset Options
 
 | Button | Effect |
 |---|---|
@@ -350,7 +350,7 @@ When the bundled database (`alchemy_db.js`) has a newer version than your local 
 
 ---
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 AlchemyFactoryCalculator/
@@ -375,7 +375,7 @@ No build tools, bundlers, or external dependencies. Pure HTML + CSS + vanilla Ja
 
 ---
 
-## 🤝 Contributing & Customization
+## Contributing & Customization
 
 - **Fork freely.** All data and logic are in plain text files.
 - To add a new item or recipe, edit `alchemy_db.js` (or use the Database Editor in the browser).

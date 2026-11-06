@@ -943,9 +943,9 @@ function _buildMachineListHTML() {
         var sel  = name === _selectedMachine ? ' selected' : '';
         var machine = machines[name] || {};
         let badges = ' ';
-        if(machine.heatCost || machine.isGenerator) badges += '🔥';
-        if(machine.fertility) badges += '🌱';
-        if(_tn("Glass", 'items') in machine["buildCost"]) badges += '💧';        
+        if(machine.heatCost || machine.isGenerator) badges += ' · Heat';
+        if(machine.fertility) badges += ' · Nutr';
+        if(_tn("Glass", 'items') in machine["buildCost"]) badges += ' · Glass';        
         const machineIcon = `<img src="img/machines/${name.toLowerCase().replaceAll(' ', '-')}.png" width="16" height="16" loading="lazy" onerror="this.style.opacity='0'">`;
         return '<div class="wiki-tile machine-tile' + sel + '" data-name="' + name.replace(/"/g, '&quot;') + '" '
             + _oc('wikiSelectMachine', name) + '>'

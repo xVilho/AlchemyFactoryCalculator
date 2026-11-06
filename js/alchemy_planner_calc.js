@@ -659,7 +659,7 @@ function _autoGenerateUpstreamNodesCore(nodeId) {
 
     const sourceEl = document.getElementById('planner-node-' + nodeId);
     const sourceHeight = sourceEl ? sourceEl.offsetHeight : 116;
-    const newNodeWidth = 200;
+    const newNodeWidth = 250; // Default .planner-node width in style.css
     let x = plannerSnapVal(sourceNode.x - newNodeWidth - 120);
 
     const heights = plans.map(p => estimatePlannerNodeHeight(p.recipe));
@@ -1188,7 +1188,7 @@ function encapsulatePlannerSelectedNodes() {
         const node = plannerState.nodes[id];
         if (!node) return;
         const el = document.getElementById('planner-node-' + id);
-        const w = el ? el.offsetWidth : 200;
+        const w = el ? el.offsetWidth : 250;
         const h = el ? el.offsetHeight : 140;
         sumX += node.x + w / 2;
         sumY += node.y + h / 2;

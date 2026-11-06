@@ -389,7 +389,7 @@ function renderCalculationResult(params, result) {
             <span style="margin-left:auto; cursor:pointer;">
                 <button class="recycle-btn" onclick="setAllRecycling(true)" title="Recycle all byproducts">${t('Reuse All Byproduct')}</button>
                 <button class="recycle-btn" onclick="setAllRecycling(false)" titile="Don't recycle any byproduct">${t('Reset All')}</button>
-                <span class="section-header" onclick="toggleFirstLevel()" title="Toggle First Level" style="margin-right:10px;">💠</span>
+                <span class="section-header" onclick="toggleFirstLevel()" title="Toggle First Level" style="margin-right:10px;">◈</span>
             </span>
             ${fuelTag}
             ${bioTag}
@@ -448,7 +448,7 @@ function renderChainRecipeAlternatives(params) {
     let html = `
         <div class="chain-recipes-panel">
             <div class="chain-recipes-header">
-                <span>⚡ ${t('Alternative Recipes in Chain')} (${params.targetItem})</span>
+                <span>${t('Alternative Recipes in Chain')} (${params.targetItem})</span>
                 <span style="font-size:0.8em; color:#888; font-weight:normal;">${t('Click to switch recipe for this item across the chain')}</span>
             </div>
             <div class="chain-recipes-list">
@@ -534,7 +534,7 @@ function renderCostEntries(costEntries, itemName) {
     return costEntries.map(entry => {
         if (entry.type !== 'gold') return ``; // ignore fuel and fert cost
         const amount = Math.ceil(entry.amount - Number.EPSILON).toLocaleString();
-        const bolt = entry.custom ? ' ⚡' : '';
+        const bolt = entry.custom ? ' *' : '';
         return `<span class="cost-tag" style="cursor:pointer;" title="${t('Manage Custom Cost')}"
             onclick="event.stopPropagation(); openCustomCostModal('${itemName}')">-${amount} /m <img src="img/copper.png" class="item-icon-small">${bolt}</span>`;
     }).join('');
@@ -573,14 +573,14 @@ function renderTreeNode(params, node) {
             const usageRatio = node.maxOutput > 0 ? node.netRate / node.maxOutput : 0;
             capTag = `<span class="max-cap-tag" onclick="recalculate('${params.targetItem}', ${params.targetRate / usageRatio})">(Max: ${formatVal(node.maxOutput)}/m)</span>`;
         }
-        const machineIcon = node.tags.heat ? '🔥' : (node.tags.bio ? '🌱' : '');
+        const machineIcon = node.tags.heat ? '[Heat]' : (node.tags.bio ? '[Nutr]' : '');
         const machineNumber = params.showRawMachineCount ? Number(node.machineCount.toFixed(2)) : Math.ceil(node.machineCount - 0.0001);
         machineTag = `<span class="machine-tag" data-tooltip="${tooltipText}">${machineNumber} ${t(node.machine, 'machines')}${capTag} ${machineIcon}</span>`;
         const recipeCandidates = getRecipesFor(node.item);
         const hasCauldronTarget = itemDef && itemDef.cauldronTarget !== undefined;
         const hasRecipeModifier = recipeCandidates?.length === 1 && recipeCandidates[0].machine === 'Advanced Athanor';
         if (recipeCandidates.length > 1 || hasCauldronTarget || hasRecipeModifier) {
-            swapBtn = `<button class="swap-btn" onclick="openRecipeModal('${node.item}', '${node.pathKey}')" title="${t('Swap Recipe')}">🔄</button>`;
+            swapBtn = `<button class="swap-btn" onclick="openRecipeModal('${node.item}', '${node.pathKey}')" title="${t('Swap Recipe')}">⇄</button>`;
         }
     }
 
@@ -606,15 +606,15 @@ function renderTreeNode(params, node) {
     let catalystExpandTag = '';
     if (node.tags.catalystType) {
         const expanded = !!DB.settings.expandCatalystInputs?.[node.tags.catalystType];
-        catalystExpandTag = `<div><button class="recycle-btn ${expanded ? 'active' : ''}" onclick="toggleCatalystExpand('${node.tags.catalystType}')">🧪${expanded ? t('Expand') : t('Fold')}</button></div>`;
+        catalystExpandTag = `<div><button class="recycle-btn ${expanded ? 'active' : ''}" onclick="toggleCatalystExpand('${node.tags.catalystType}')">${expanded ? t('Expand') : t('Fold')}</button></div>`;
     }
 
     let recycleTag = '';
     if (node.canRecycle) {
         if (node.recycleActive) {
-            recycleTag = `<div><button class="recycle-btn active" onclick="toggleRecycle('${node.pathKey}')">♻️ ${formatVal(node.deductionRate)} ${t('Used')}</button></div>`;
+            recycleTag = `<div><button class="recycle-btn active" onclick="toggleRecycle('${node.pathKey}')">↺ ${formatVal(node.deductionRate)} ${t('Used')}</button></div>`;
         } else {
-            recycleTag = `<div><button class="recycle-btn" onclick="toggleRecycle('${node.pathKey}')">♻️ ${formatVal(node.recycleAvailable)} ${t('Avail')}</button></div>`;
+            recycleTag = `<div><button class="recycle-btn" onclick="toggleRecycle('${node.pathKey}')">↺ ${formatVal(node.recycleAvailable)} ${t('Avail')}</button></div>`;
         }
     }
 

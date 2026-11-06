@@ -19,10 +19,10 @@ const PICKER_PROP_DEFS = [
 ];
 
 const ATHANOR_CATALYSTS = [
-    { id: 'unstable', label: '🧪 Unstable', charges: 180 },
-    { id: 'fertile',  label: '🌿 Fertile', charges: 240  },
-    { id: 'resonant', label: '✨ Resonant', charges: 1500 },
-    { id: 'eternal',  label: '♾️ Eternal', charges: 99999  },
+    { id: 'unstable', label: 'Unstable', charges: 180 },
+    { id: 'fertile',  label: 'Fertile', charges: 240  },
+    { id: 'resonant', label: 'Resonant', charges: 1500 },
+    { id: 'eternal',  label: 'Eternal', charges: 99999  },
 ];
 
 /* ==========================================================================
@@ -845,9 +845,9 @@ function _renderRecipeModalScopeBar() {
     bar.style.cssText = 'display:flex; gap:4px; margin:8px 0;';
     bar.innerHTML = `
         <button class="tab-btn mini-tab ${_recipeModalScope === 'global' ? 'active' : ''}"
-            onclick="_setRecipeModalScope('global')">🌐 ${t('Global')}</button>
+            onclick="_setRecipeModalScope('global')">${t('Global')}</button>
         <button class="tab-btn mini-tab ${_recipeModalScope === 'node' ? 'active' : '' }" title="${_recipeModalPathKey}"
-            onclick="_setRecipeModalScope('node')">📍 ${t('This Node Only')}</button>
+            onclick="_setRecipeModalScope('node')">${t('This Node Only')}</button>
     `;
     document.getElementById('recipe-list').insertAdjacentElement('beforebegin', bar);
 }
@@ -925,7 +925,7 @@ function _renderRecipeModalList() {
             }
 
             div.innerHTML = `
-                <div class="recipe-header"><span><strong>${t(r.machine, 'machines')}</strong> <span style="font-size:0.9em; opacity:0.8;">( ${previewTime !== null ? previewTime.toFixed(2) : '—'} s )</span></span>${r.id === currentId ? '✅' : ''}</div>
+                <div class="recipe-header"><span><strong>${t(r.machine, 'machines')}</strong> <span style="font-size:0.9em; opacity:0.8;">( ${previewTime !== null ? previewTime.toFixed(2) : '—'} s )</span></span>${r.id === currentId ? '✓' : ''}</div>
                 <div class="recipe-details">${t('Input')}: ${pickerHtml}<br>${t('Yields')}: 1x <img src="img/item${DB.items[item]?.id ?? 0}.png" width="18" height="18"> ${item}</div>
                 ${warnHtml}
             `;
@@ -972,7 +972,7 @@ function _renderRecipeModalList() {
         let inputs = []; Object.keys(recipeInputs).forEach(key => { inputs.push(`${Number(recipeInputs[key].toFixed(4))}x ${key}<img src="img/item${DB.items[key]?.id ?? 0}.png" width="18" height="18">`); });
         let outputs = []; Object.keys(recipeOutputs).forEach(key => { outputs.push(`${Number(recipeOutputs[key].toFixed(4))}x ${key}<img src="img/item${DB.items[key]?.id ?? 0}.png" width="18" height="18">`); });
         let content = `
-            <div class="recipe-header"><span><strong>${t(r.machine, 'machines')}</strong> <span style="font-size:0.9em; opacity:0.8;">( ${r.baseTime} s )</span></span>${r.id === currentId ? '✅' : ''}</div>
+            <div class="recipe-header"><span><strong>${t(r.machine, 'machines')}</strong> <span style="font-size:0.9em; opacity:0.8;">( ${r.baseTime} s )</span></span>${r.id === currentId ? '✓' : ''}</div>
             <div class="recipe-details">${t('Input')}: ${inputs.join(', ')}<br>${t('Yields')}: ${outputs.join(', ')}</div>
         `;
 
@@ -1022,7 +1022,7 @@ function _renderRecipeModalList() {
         if (chainAlts.length > 0) {
             const altSection = document.createElement('div');
             altSection.style.cssText = 'margin-top:16px; padding-top:12px; border-top:1px dashed #555;';
-            let altHtml = `<div style="font-size:0.88em; font-weight:bold; color:var(--accent); margin-bottom:8px;">⚡ ${t('Alternative Recipes in Chain')}</div>`;
+            let altHtml = `<div style="font-size:0.88em; font-weight:bold; color:var(--accent); margin-bottom:8px;">${t('Alternative Recipes in Chain')}</div>`;
             chainAlts.forEach(alt => {
                 const itemDef = DB.items[alt.item];
                 altHtml += `
@@ -1196,7 +1196,7 @@ function openUnitCostModal() {
         if (data.chainAlternatives && data.chainAlternatives.length > 0) {
             altSectionHtml = `
                 <div class="unit-modal-section">
-                    <div class="unit-modal-section-title">⚡ ${t('Recipe Choices in Chain')}</div>
+                    <div class="unit-modal-section-title">${t('Recipe Choices in Chain')}</div>
                     <div class="chain-recipes-list">
             `;
             data.chainAlternatives.forEach(alt => {
@@ -1232,7 +1232,7 @@ function openUnitCostModal() {
         // Section 3: Raw Materials Required
         let rawSectionHtml = `
             <div class="unit-modal-section">
-                <div class="unit-modal-section-title">📦 ${t('Raw Materials Required for 1 Unit')}</div>
+                <div class="unit-modal-section-title">${t('Raw Materials Required for 1 Unit')}</div>
                 <div class="unit-mats-grid">
         `;
         data.rawMaterials.forEach(rm => {
@@ -1259,7 +1259,7 @@ function openUnitCostModal() {
         if (data.intermediates && data.intermediates.length > 0) {
             intermediateSectionHtml = `
                 <div class="unit-modal-section" style="border-bottom:none; margin-bottom:0; padding-bottom:0;">
-                    <div class="unit-modal-section-title">🔄 ${t('Intermediate Components Produced')}</div>
+                    <div class="unit-modal-section-title">${t('Intermediate Components Produced')}</div>
                     <div class="unit-intermediates-list">
             `;
             data.intermediates.forEach(im => {
@@ -1278,7 +1278,7 @@ function openUnitCostModal() {
         if (data.totalHeat > 0) {
             heatSectionHtml = `
                 <div class="unit-modal-section">
-                    <div class="unit-modal-section-title">🔥 ${t('Heating & Fuel Demand')}</div>
+                    <div class="unit-modal-section-title">${t('Heating & Fuel Demand')}</div>
                     <div class="unit-mats-grid">
                         <div class="unit-mat-card">
                             <div class="unit-mat-info">
@@ -1309,7 +1309,7 @@ function openUnitCostModal() {
 
 function openCustomCostModal(focusItem = null) {
     if (!DB.settings.customCosts) DB.settings.customCosts = {};
-    document.getElementById('custom-cost-modal-title').innerText = '⚙ ' + t('Manage Custom Costs', 'ui');
+    document.getElementById('custom-cost-modal-title').innerText = t('Manage Custom Costs', 'ui');
     renderCustomCostList(focusItem);
     document.getElementById('custom-cost-modal').style.display = 'flex';
 }

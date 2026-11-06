@@ -506,7 +506,7 @@ function renderExpTable() {
             <td class="num">${fmtExpTime(r.altarSec)}</td>
             <td class="num">${fmtExpNum(r.expPerAltarMin)}</td>
             <td>
-                <button class="split-btn exp-small-btn" data-item="${escExp(r.item)}" onclick="openExpItemInCalc(this.dataset.item)" title="${t('Open in Calculator')}">📊</button>
+                <button class="split-btn exp-small-btn" data-item="${escExp(r.item)}" onclick="openExpItemInCalc(this.dataset.item)" title="${t('Open in Calculator')}">↗</button>
                 <button class="split-btn exp-small-btn" data-item="${escExp(r.item)}" onclick="addExpLeftover(this.dataset.item)" title="${t('Add to leftovers')}">＋</button>
             </td>
         </tr>`;

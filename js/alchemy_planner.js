@@ -579,7 +579,8 @@ function attachPlannerKeyboardShortcuts() {
         else if (e.key === '-' || e.key === '_') { e.preventDefault(); plannerZoomOut(); }
         else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); plannerFitToView(); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); plannerUndo(); }
-        else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); plannerRedo(); }        
+        else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); plannerRedo(); }
+        else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); plannerModuleBack(); }
         else if ((e.key === 'Delete' || e.key === 'Backspace') && _plannerSelectedNodeIds.size > 0) {
             e.preventDefault();
             deletePlannerSelectedNodes();
@@ -713,8 +714,7 @@ function renderPlannerHeatSelect() {
             .filter(([, m]) => m.isGenerator)
             .sort(([a], [b]) => a.localeCompare(b))
             .forEach(([name]) => {
-                const icon = name === 'Steam Heating Pad' ? '♨' : '🔥';
-                heatSel.appendChild(new Option(`${icon} ${t(name, 'machines')}`, name));
+                heatSel.appendChild(new Option(t(name, 'machines'), name));
             });
         heatSel.value = energy.heating;
     }
@@ -955,8 +955,14 @@ function createPlannerNodeEl(node, flows) {
     else {
         const plan = plannerLibrary.plans[node.moduleId];
         const titleName = plan ? plan.name : t('Invalid Module', 'ui');
+        // Double-click anywhere on the module card (except controls/ports) opens the module's plan
+        wrap.addEventListener('dblclick', (e) => {
+            if (e.target.closest('button, input, textarea, select, .planner-port-dot, .planner-node-resize-handle')) return;
+            e.stopPropagation();
+            enterPlannerModule(node.moduleId);
+        });
         wrap.innerHTML += `
-        <div class="planner-node-header module" 
+        <div class="planner-node-header module"
             onmouseenter="onPlannerHeaderHover(this, '${node.id}')"
             onmouseleave="hidePlannerRateTooltip()">
             <span class="planner-node-title">${titleName}</span>            
@@ -1003,7 +1009,44 @@ function createPlannerNodeEl(node, flows) {
     `;
 
     attachPlannerNodeDrag(wrap, node);
+    attachPlannerNodeResize(wrap, node);
     return wrap;
+}
+
+const PLANNER_NODE_MIN_W = 180, PLANNER_NODE_MAX_W = 600;
+
+/** Width handle on recipe/module nodes: drag to resize (stored as node.w), double-click to reset to the default width */
+function attachPlannerNodeResize(wrap, node) {
+    if (node.w) wrap.style.width = node.w + 'px';
+    const handle = document.createElement('div');
+    handle.className = 'planner-node-resize-handle';
+    handle.title = t('Drag to resize, double-click to reset', 'ui');
+    wrap.appendChild(handle);
+    handle.addEventListener('dblclick', e => {
+        e.stopPropagation();
+        delete node.w;
+        wrap.style.width = '';
+        if (_plannerLastFlows) renderPlannerEdges(_plannerLastFlows);
+        savePlannerState();
+    });
+    handle.addEventListener('pointerdown', e => {
+        e.stopPropagation(); e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        const startX = e.clientX, startW = wrap.offsetWidth;
+        const move = ev => {
+            const zoom = _plannerSettings.viewport.zoom || 1;
+            node.w = Math.round(Math.min(PLANNER_NODE_MAX_W, Math.max(PLANNER_NODE_MIN_W, startW + (ev.clientX - startX) / zoom)));
+            wrap.style.width = node.w + 'px';
+            if (_plannerLastFlows) renderPlannerEdges(_plannerLastFlows); // Output port dots move with the right edge
+        };
+        const up = () => {
+            handle.removeEventListener('pointermove', move);
+            handle.removeEventListener('pointerup', up);
+            savePlannerState();
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', up);
+    });
 }
 
 function _plannerEscapeHtml(value) {
@@ -1035,7 +1078,7 @@ function renderPlannerPortalNode(wrap, node, flows) {
 
     wrap.innerHTML = `
         <div class="planner-node-header portal">
-            <span class="planner-node-icon">🌀</span>
+            <span class="planner-node-icon">◎</span>
             <span class="planner-node-title" onclick="event.stopPropagation(); plannerPickPortalItem('${node.id}')">
                 ${_plannerEscapeHtml(title)}
             </span>
@@ -1150,7 +1193,7 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
     // Heating fuel / Steam on an input: mark the port so it's clear it feeds the heating
     const heatPart = dir === 'in' ? ((flows && flows.nodePortsCache[nodeId]?.heatByItem?.[port.item]) || 0) : 0;
     const isHeatPort = heatPart > 0 || (dir === 'in' && port.item === 'Steam' && flows?.nodePortsCache[nodeId]?.needsHeat);
-    const name = `<span class="planner-port-name">${isHeatPort ? '🔥' : ''}${port.item}</span>`;
+    const name = `<span class="planner-port-name">${port.item}</span>`;
     const rate = `<span class="planner-port-rate">${formatVal(port.rate)}</span>`;
     const title = isHeatPort ? `${port.item}: heating${heatPart > 0 && heatPart < port.rate - 0.0001 ? ` (${formatVal(heatPart)}/m of it)` : ''}` : port.item;
     if (dir === 'in') return `<div class="planner-port planner-port-in ${rateClass}${isHeatPort ? ' planner-port-heat' : ''}" title="${title}">${badgeHtml}${dot}${rate}${icon}${name}</div>`;
@@ -1162,7 +1205,7 @@ function renderPlannerHeatFertHtml(ports, node) {
     Object.entries(ports.heatByItem || {}).forEach(([fuelName, rate]) => {
         if (!(rate > 0.001)) return;
         const fuelDef = DB.items[fuelName] || {};
-        html += `<span class="heat-tag" title="${fuelName} burned for heat (included in the ${fuelName} input)">🔥 ${formatVal(rate)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"></span>`;
+        html += `<span class="heat-tag" title="${fuelName} burned for heat (included in the ${fuelName} input)">${t('Heat', 'ui')} ${formatVal(rate)}/m <img src="img/item${fuelDef.id ?? 0}.png" class="item-icon-small"></span>`;
     });
     if (ports.fertItemsPerMin > 0.001) {
         const fertName = plannerEnergy().fert;
@@ -1215,7 +1258,7 @@ function renderPlannerBeltChipHtml(node) {
         t('Click: set machine count to fill the next whole belt', 'ui')
     ];
     return `<span class="belt-tag" title="${_plannerEscapeHtml(lines.join('\n'))}"
-        onpointerdown="event.stopPropagation()" onclick="event.stopPropagation(); plannerFillNodeBelts('${node.id}')">🛤 ${formatVal(info.wholePerBelt)}/${t('belt', 'ui')} <span class="belt-tag-used">(${beltsUsed.toFixed(1)})</span></span>`;
+        onpointerdown="event.stopPropagation()" onclick="event.stopPropagation(); plannerFillNodeBelts('${node.id}')">≡ ${formatVal(info.wholePerBelt)}/${t('belt', 'ui')} <span class="belt-tag-used">(${beltsUsed.toFixed(1)})</span></span>`;
 }
 
 /** Round machine count up to fill whole belts on the tightest port; if already full, add one more belt. */
@@ -1405,10 +1448,10 @@ function getPlannerLinkTitle() {
 }
 
 function getPlannerLinkIcon() {
-    if (_plannerLinkMode === 'all') return '🔗';
+    if (_plannerLinkMode === 'all') return '⇔';
     if (_plannerLinkMode === 'upstream') return '◀';
     if (_plannerLinkMode === 'downstream') return '▶';
-    return '🔗';
+    return '⇔';
 }
 
 function updateAllPlannerLinkButtons() {
@@ -2017,7 +2060,9 @@ function _plannerEmptyHintEntries() {
         [t('Drag port dot to another port', 'ui'), t('Connect two ports', 'ui')],
         [t('Drag port dot to empty canvas', 'ui'), t('Create a new connected node', 'ui')],
         [t('Middle-click waypoint', 'ui'), t('Remove the dot but keep the line', 'ui')],
-        [t('Double-click waypoint', 'ui'), t('Delete the dot and its lines', 'ui')]
+        [t('Double-click waypoint', 'ui'), t('Delete the dot and its lines', 'ui')],
+        [t('Double-click module node', 'ui'), t('Open the module (path bar + ◀ Back to return)', 'ui')],
+        [t('Alt + ←', 'ui'), t('Back to the previous module', 'ui')]
     ];
 }
 

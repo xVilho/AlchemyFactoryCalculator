@@ -40,7 +40,7 @@ const SETTINGS_BACKUP_KEY = "alchemy_settings_backup_v1";
        GLOBAL per catalyst-TYPE (unstable/fertile/resonant/eternal), not per
        recipe or per node. Controls whether Advanced Athanor catalyst inputs
        are expanded into their own subtree in the Calculator tab tree, or
-       collapsed into an external-input leaf. Toggled via the 🧪 button on
+       collapsed into an external-input leaf. Toggled via the catalyst Expand button on
        tree nodes (toggleCatalystExpand).
    ========================================================================== */
 

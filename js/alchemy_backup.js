@@ -91,7 +91,7 @@
         wrap.innerHTML = `
             <div class="modal-content" onclick="event.stopPropagation()" style="max-width:640px;">
                 <div class="modal-header">
-                    <h2 style="font-size:1.1em; margin:0;">💾 Backup &amp; Restore</h2>
+                    <h2 style="font-size:1.1em; margin:0;">Backup &amp; Restore</h2>
                     <button class="close-modal" onclick="closeModal('${MODAL_ID}')">&times;</button>
                 </div>
                 <p class="backup-note">Saves your planner plans, cauldron recipes, settings and database edits to a file,

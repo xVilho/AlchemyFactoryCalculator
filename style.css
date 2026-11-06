@@ -674,6 +674,32 @@ button.reset-btn:hover { background: var(--danger); color: white; }
     padding: 8px 14px; border-bottom: 1px solid var(--border);
     flex-shrink: 0; flex-wrap: wrap; background: var(--panel);
 }
+.planner-toolbar .planner-delete-plan-btn {
+    background: rgba(244,67,54,0.15); border-color: var(--danger); color: var(--danger);
+}
+.planner-toolbar .planner-delete-plan-btn:hover { background: var(--danger); color: #fff; }
+
+.planner-breadcrumb {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 14px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; background: #1b1f2a; font-size: 0.88em;
+}
+.planner-crumb-back {
+    flex-shrink: 0; background: #2a2f3d; border: 1px solid var(--border); color: #ddd;
+    border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 1em;
+}
+.planner-crumb-back:hover:not(:disabled) { background: #3a4155; color: #fff; }
+.planner-crumb-back:disabled { opacity: 0.4; cursor: not-allowed; }
+.planner-crumb-path { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.planner-crumb {
+    background: none; border: none; color: var(--info, #64b5f6); cursor: pointer;
+    padding: 2px 6px; border-radius: 4px; font-size: 1em; white-space: nowrap;
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+}
+button.planner-crumb:hover { background: rgba(255,255,255,0.08); text-decoration: underline; }
+.planner-crumb.current { color: #fff; font-weight: bold; cursor: default; }
+.planner-crumb-sep { color: #666; }
+
 .planner-toolbar .split-btn {
     flex: 0 0 auto;
     width: auto;
@@ -843,7 +869,7 @@ button.reset-btn:hover { background: var(--danger); color: white; }
 
 
 .planner-node {
-    position: absolute; width: 200px;
+    position: absolute; width: 250px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     user-select: none;
@@ -881,7 +907,13 @@ button.reset-btn:hover { background: var(--danger); color: white; }
     position: relative; display: flex; align-items: center; gap: 4px;
     font-size: 0.8em; white-space: nowrap; padding: 2px 2px; min-width: 0; cursor: crosshair;
 }
-.planner-port-name { color: #ccc; overflow: hidden; text-overflow: ellipsis; max-width: 90px; min-width: 0; flex-shrink: 1; flex: 1 1 auto; }
+.planner-port-name { color: #ccc; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+/* Drag to change node width (double-click resets) */
+.planner-node-resize-handle {
+    position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; cursor: ew-resize;
+    border-right: 2px solid #555; border-bottom: 2px solid #555; border-radius: 0 0 6px 0; opacity: 0.6;
+}
+.planner-node-resize-handle:hover { opacity: 1; border-color: var(--accent); }
 .planner-port-out > .planner-port-name { text-align: right; }
 .planner-port-rate { color: #fff; font-weight: bold; flex-shrink: 0; }
 .planner-port-heat > .planner-port-name { color: var(--fuel, #ff7043); }

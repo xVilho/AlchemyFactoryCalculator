@@ -394,6 +394,7 @@ function _togglePreferred(itemName, recipeId) {
         if (typeof calculate === 'function') calculate();
     } catch(e) { console.warn('help: togglePreferred failed', e); }
     _renderItemDetail(itemName);
+    if (typeof cauldronWikiRefresh === 'function') cauldronWikiRefresh();
 }
 
 /* ─── FORMAT HELPERS ─── */
@@ -409,12 +410,16 @@ function _fmtItems(obj) {
         var name = e[0], qty = e[1];
         var def = rawDB.items && rawDB.items[name];
         var label = name.replace(/"/g, '&quot;');
-        return '<span class="wiki-recipe-item" title="' + label + ' \xd7' + qty + '"' + _oc('wikiSwitchToItem', name) + '>'
+        return '<span class="wiki-recipe-item" title="' + label + ' \xd7' + qty + '"' + _oc(_wikiItemClickFn, name) + '>'
             + _itemIcon(def ? def.id : 0, 22)
             + '<span class="wiki-item-qty">\xd7' + Number(qty.toFixed(3)) + '</span>'
             + '</span>';
     }).join('');
 }
+
+/* Click targets for item/machine links inside item detail HTML (the cauldron popover swaps these) */
+var _wikiItemClickFn = 'wikiSwitchToItem';
+var _wikiMachineClickFn = 'wikiSwitchToMachine';
 
 /* Safe onclick helpers */
 function _oc(fn, arg) {
@@ -792,9 +797,14 @@ function _updateLayoutState() {
 function _renderItemDetail(itemName) {
     var pane = document.getElementById('wiki-right-pane');
     if (!pane) return;
+    pane.innerHTML = _buildItemDetailHTML(itemName);
+}
+
+/** Item detail page as HTML (stats, production recipes, used in); shared by the wiki and the cauldron popover */
+function _buildItemDetailHTML(itemName) {
     var rawDB = (typeof DB !== 'undefined') ? DB : {};
     var def   = rawDB.items && rawDB.items[itemName];
-    if (!def) { pane.innerHTML = '<div class="wiki-placeholder">' + _tn('Item data not found') + '</div>'; return; }
+    if (!def) return '<div class="wiki-placeholder">' + _tn('Item data not found') + '</div>';
 
     var idx       = _getWikiIndex();
     var producers = idx.producedBy[itemName] || [];
@@ -843,7 +853,7 @@ function _renderItemDetail(itemName) {
                 + '<span class="wiki-items">' + outHTML + '</span>'
                 + '</div>'
                 + '<div class="wiki-recipe-right">'
-                + '<span class="wiki-recipe-machine" ' + _oc('wikiSwitchToMachine', recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
+                + '<span class="wiki-recipe-machine" ' + _oc(_wikiMachineClickFn, recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
                 + (recipe.baseTime != null ? '<span>' + recipe.baseTime + 's</span>' : '')
                 + (producers.length > 1 ? '<button class="split-btn wiki-pref-btn' + (isPreferred ? ' active' : '') + '" style="padding:2px 8px; font-size:0.75em; margin-left:6px;" onclick="_togglePreferred(decodeURIComponent(\'' + encodeURIComponent(itemName) + '\'), decodeURIComponent(\'' + encodeURIComponent(recipe.id) + '\'))">' + (isPreferred ? '★ ' + _tn('Preferred') : '☆ ' + _tn('Set Preferred')) + '</button>' : '')
                 + '</div></div>';
@@ -862,9 +872,8 @@ function _renderItemDetail(itemName) {
                 + '<span class="wiki-items">' + outHTML + '</span>'
                 + '</div>'
                 + '<div class="wiki-recipe-right">'
-                + '<span class="wiki-recipe-machine" ' + _oc('wikiSwitchToMachine', recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
+                + '<span class="wiki-recipe-machine" ' + _oc(_wikiMachineClickFn, recipe.machine) + '>' + _tn(recipe.machine, 'machines') + '</span>'
                 + (recipe.baseTime != null ? '<span>' + recipe.baseTime + 's</span>' : '')
-                + (producers.length > 1 ? '<button class="split-btn wiki-pref-btn' + (isPreferred ? ' active' : '') + '" style="padding:2px 8px; font-size:0.75em; margin-left:6px;" onclick="_togglePreferred(decodeURIComponent(\'' + encodeURIComponent(itemName) + '\'), decodeURIComponent(\'' + encodeURIComponent(recipe.id) + '\'))">' + (isPreferred ? '★ ' + _tn('Preferred') : '☆ ' + _tn('Set Preferred')) + '</button>' : '')
                 + '</div></div>';
           }).join('');
 
@@ -880,7 +889,7 @@ function _renderItemDetail(itemName) {
             var inHTML = _fmtItems(machineDef.buildCost || {});
             var machineIconSrc = 'img/machines/' + machineName.toLowerCase().replaceAll(' ', '-') + '.png';
             var outHTML = '<span class="wiki-recipe-item" title="' + _tn(machineName, 'machines').replace(/"/g, '&quot;') + ' \xd71" '
-                + _oc('wikiSwitchToMachine', machineName) + '>'
+                + _oc(_wikiMachineClickFn, machineName) + '>'
                 + '<img src="' + machineIconSrc + '" width="22" height="22" loading="lazy" onerror="this.style.opacity=\'0.15\'">'
                 + '<span class="wiki-item-qty">\xd71</span></span>';
             return '<div class="wiki-recipe-row">'
@@ -890,12 +899,11 @@ function _renderItemDetail(itemName) {
                 + '<span class="wiki-items">' + outHTML + '</span>'
                 + '</div>'
                 + '<div class="wiki-recipe-right">'
-                + '<span class="wiki-recipe-machine" ' + _oc('wikiSwitchToMachine', machineName) + '>' + _tn(machineName, 'machines') + '</span>'
+                + '<span class="wiki-recipe-machine" ' + _oc(_wikiMachineClickFn, machineName) + '>' + _tn(machineName, 'machines') + '</span>'
                 + '</div></div>';
           }).join('');
 
-    pane.innerHTML =
-        '<div class="wiki-detail-header">'
+    return '<div class="wiki-detail-header">'
         + _itemIcon(def.id, 32)
         + '<div class="wiki-detail-title-area">'
         + '<h2 class="wiki-detail-name">' + itemName + '</h2>'

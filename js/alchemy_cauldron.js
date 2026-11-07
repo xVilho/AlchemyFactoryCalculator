@@ -65,6 +65,7 @@ function initCauldron() {
     document.getElementById('cauldron-cand-max-coins').value = cauldronState.maxCoins;
     document.getElementById('cauldron-use-limits-pool').checked = cauldronState.useLimitsAsPool;
     renderCandidatePool();
+    _initCauldronWikiPopover();
     runCauldronSimulation();
 }
 
@@ -2207,4 +2208,180 @@ function _applyCauldronModalRecipe() {
     closeModal('cauldron-recipe-modal');
     closeModal('recipe-modal');
     calculate();
+}
+
+/* ==========================================================================
+   SECTION: CAULDRON WIKI POPOVER
+   Hover any item icon in the Cauldron tab to see its wiki page (stats, recipes, used in).
+   Move the mouse into the popover to keep it open; clicking an item inside it pins the
+   popover and navigates to that item. Esc or a click outside closes a pinned popover.
+   ========================================================================== */
+
+const CW_SHOW_DELAY = 300, CW_HIDE_DELAY = 250;
+let _cwIdToName = null;
+let _cwShowTimer = null, _cwHideTimer = null;
+let _cwPinned = false, _cwItem = null, _cwHistory = [];
+
+function _cwItemNameFromImg(img) {
+    const m = /img\/item(\d+)\.png/.exec(img.getAttribute('src') || '');
+    if (!m || m[1] === '0') return null;
+    if (!_cwIdToName) {
+        _cwIdToName = {};
+        Object.entries(DB.items).forEach(([name, def]) => {
+            if (def.id != null && !(def.id in _cwIdToName)) _cwIdToName[def.id] = name;
+        });
+    }
+    return _cwIdToName[m[1]] || null;
+}
+
+function _cwEnsurePopover() {
+    let pop = document.getElementById('cauldron-wiki-pop');
+    if (pop) return pop;
+    if (typeof _injectHelpStyles === 'function') _injectHelpStyles(); // wiki-* classes
+    if (!document.getElementById('cauldron-wiki-styles')) {
+        const st = document.createElement('style');
+        st.id = 'cauldron-wiki-styles';
+        st.textContent = `
+            #cauldron-wiki-pop { position: fixed; z-index: 2000; width: 440px; max-width: calc(100vw - 16px);
+                max-height: 70vh; display: none; flex-direction: column; background: var(--panel, #1b1b1b);
+                border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.55); }
+            #cauldron-wiki-pop.open { display: flex; }
+            #cauldron-wiki-pop.pinned { border-color: var(--accent, #4CAF50); }
+            .cw-toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); }
+            .cw-toolbar .cw-spacer { flex: 1; font-size: 0.75em; color: #777; }
+            .cw-toolbar button { padding: 2px 8px; font-size: 0.8em; width: auto; }
+            .cw-body { overflow-y: auto; padding: 10px 12px; }
+            #view-cauldron img[src*="img/item"] { cursor: help; }
+        `;
+        document.head.appendChild(st);
+    }
+    pop = document.createElement('div');
+    pop.id = 'cauldron-wiki-pop';
+    pop.addEventListener('mouseenter', () => clearTimeout(_cwHideTimer));
+    pop.addEventListener('mouseleave', () => { if (!_cwPinned) _cwScheduleHide(); });
+    document.body.appendChild(pop);
+    return pop;
+}
+
+function _cwRender() {
+    const pop = _cwEnsurePopover();
+    const prevItemFn = _wikiItemClickFn, prevMachineFn = _wikiMachineClickFn;
+    _wikiItemClickFn = 'cauldronWikiNavigate';
+    _wikiMachineClickFn = 'cauldronWikiOpenMachine';
+    let html;
+    try { html = _buildItemDetailHTML(_cwItem); }
+    finally { _wikiItemClickFn = prevItemFn; _wikiMachineClickFn = prevMachineFn; }
+    const hint = _cwPinned ? '' : t('Click an item to pin', 'ui');
+    pop.innerHTML = `
+        <div class="cw-toolbar">
+            ${_cwHistory.length ? `<button class="split-btn" onclick="cauldronWikiBack()" title="${t('Back', 'ui')}">&larr;</button>` : ''}
+            <span class="cw-spacer">${hint}</span>
+            <button class="split-btn" onclick="cauldronWikiTogglePin()">${_cwPinned ? t('Unpin', 'ui') : t('Pin', 'ui')}</button>
+            <button class="split-btn" onclick="cauldronWikiOpenInWiki()">${t('Open in Wiki', 'ui')}</button>
+            <button class="split-btn" onclick="cauldronWikiClose()" title="${t('Close', 'ui')}">&times;</button>
+        </div>
+        <div class="cw-body">${html}</div>`;
+    pop.classList.add('open');
+    pop.classList.toggle('pinned', _cwPinned);
+}
+
+/** Place the popover beside the anchor rect: right side if it fits, else left; clamped to the viewport. */
+function _cwPosition(rect) {
+    const pop = _cwEnsurePopover();
+    const w = pop.offsetWidth, h = pop.offsetHeight, gap = 10, vw = window.innerWidth, vh = window.innerHeight;
+    let left = rect.right + gap;
+    if (left + w > vw - 8) left = rect.left - gap - w;
+    left = Math.max(8, Math.min(left, vw - w - 8));
+    const top = Math.max(8, Math.min(rect.top - 20, vh - h - 8));
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+}
+
+function _cwShow(name, rect) {
+    _cwItem = name;
+    _cwHistory = [];
+    _cwRender();
+    _cwPosition(rect);
+}
+
+function _cwScheduleHide() {
+    clearTimeout(_cwHideTimer);
+    _cwHideTimer = setTimeout(cauldronWikiClose, CW_HIDE_DELAY);
+}
+
+function cauldronWikiNavigate(name) {
+    if (!DB.items[name]) return;
+    if (_cwItem && _cwItem !== name) _cwHistory.push(_cwItem);
+    _cwItem = name;
+    _cwPinned = true; // Navigating inside means the user is reading: keep it open
+    _cwRender();
+}
+
+function cauldronWikiBack() {
+    if (!_cwHistory.length) return;
+    _cwItem = _cwHistory.pop();
+    _cwRender();
+}
+
+function cauldronWikiTogglePin() {
+    _cwPinned = !_cwPinned;
+    _cwRender();
+}
+
+function cauldronWikiClose() {
+    clearTimeout(_cwShowTimer); clearTimeout(_cwHideTimer);
+    _cwPinned = false; _cwItem = null; _cwHistory = [];
+    const pop = document.getElementById('cauldron-wiki-pop');
+    if (pop) pop.classList.remove('open', 'pinned');
+}
+
+/** Re-render after something changed the item data shown (e.g. preferred recipe toggled from the popover) */
+function cauldronWikiRefresh() {
+    if (_cwItem && document.getElementById('cauldron-wiki-pop')?.classList.contains('open')) _cwRender();
+}
+
+function cauldronWikiOpenInWiki() {
+    const name = _cwItem;
+    cauldronWikiClose();
+    if (!name) return;
+    switchTab('help');
+    wikiSwitchToItem(name);
+}
+
+function cauldronWikiOpenMachine(name) {
+    cauldronWikiClose();
+    switchTab('help');
+    wikiSwitchToMachine(name);
+}
+
+function _initCauldronWikiPopover() {
+    const view = document.getElementById('view-cauldron');
+    if (!view || view.dataset.wikiPopover) return;
+    view.dataset.wikiPopover = '1';
+
+    view.addEventListener('mouseover', e => {
+        const img = e.target.closest && e.target.closest('img');
+        if (!img) return;
+        const name = _cwItemNameFromImg(img);
+        if (!name) return;
+        clearTimeout(_cwHideTimer);
+        if (_cwPinned) return; // A pinned popover stays on its item
+        clearTimeout(_cwShowTimer);
+        _cwShowTimer = setTimeout(() => {
+            if (img.isConnected) _cwShow(name, img.getBoundingClientRect());
+        }, CW_SHOW_DELAY);
+    });
+    view.addEventListener('mouseout', e => {
+        const img = e.target.closest && e.target.closest('img');
+        if (!img || !_cwItemNameFromImg(img)) return;
+        clearTimeout(_cwShowTimer);
+        if (!_cwPinned && document.getElementById('cauldron-wiki-pop')?.classList.contains('open')) _cwScheduleHide();
+    });
+    // mousedown (not click): popover content is re-rendered on click, which would detach the click target
+    document.addEventListener('mousedown', e => {
+        const pop = document.getElementById('cauldron-wiki-pop');
+        if (!pop || !pop.classList.contains('open') || pop.contains(e.target)) return;
+        cauldronWikiClose();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') cauldronWikiClose(); });
 }

@@ -87,7 +87,22 @@ function plannerEnergyOf(planData) {
 
 /** Energy settings for the plan currently being calculated (module plan during its resolve, else the active plan) */
 function plannerEnergy() {
-    return plannerEnergyOf(_plannerCalcPlanData || (typeof plannerState !== 'undefined' ? plannerState : null));
+    const base = plannerEnergyOf(_plannerCalcPlanData || (typeof plannerState !== 'undefined' ? plannerState : null));
+    return _plannerNodeEnergyOverride ? { ...base, ..._plannerNodeEnergyOverride } : base;
+}
+
+/* Per-node energy override ({ heating?, fuel?, fert? } from node.energy), active only while that node's rates are computed */
+let _plannerNodeEnergyOverride = null;
+
+/** The valid part of a node's energy override, or null when the node just uses the plan's settings */
+function plannerNodeEnergyOverride(node) {
+    const e = node && node.energy;
+    if (!e) return null;
+    const ov = {};
+    if (e.heating && DB.machines[e.heating]?.isGenerator) ov.heating = e.heating;
+    if (e.fuel && DB.items[e.fuel]?.heat) ov.fuel = e.fuel;
+    if (e.fert && DB.items[e.fert]?.nutrientValue) ov.fert = e.fert;
+    return Object.keys(ov).length ? ov : null;
 }
 
 /** Heated machines consume Steam instead of fuel when the plan's heating device is the Steam Heating Pad.
@@ -120,7 +135,16 @@ function plannerGetRecipeTime(recipe) {
  * e.g. advanced machine catalysts). Not affected by any node's machineCount.
  * Returns: { recipe, inputsPerMachine, outputsPerMachine, heatItemsPerMachine, fertItemsPerMachine, goldCostPerMachine, errorCode }
  */
-function plannerGetRecipeRates(recipeId, recipeModifiers) {    
+function plannerGetRecipeRates(recipeId, recipeModifiers, node = null) {
+    const ov = plannerNodeEnergyOverride(node);
+    if (!ov) return _plannerGetRecipeRatesRaw(recipeId, recipeModifiers);
+    const prev = _plannerNodeEnergyOverride;
+    _plannerNodeEnergyOverride = { ...(prev || {}), ...ov };
+    try { return _plannerGetRecipeRatesRaw(recipeId, recipeModifiers); }
+    finally { _plannerNodeEnergyOverride = prev; }
+}
+
+function _plannerGetRecipeRatesRaw(recipeId, recipeModifiers) {
     const recipe = getRecipeById(recipeId, recipeModifiers);
     if (!recipe) {
         const rawRecipe = plannerGetRawRecipe(recipeId);
@@ -293,7 +317,7 @@ function plannerGetNodeRates(node) {
     if (node.kind === 'note') return null;
     if (node.kind === 'portal' || node.kind === 'waypoint') return plannerGetPortalRates(node);
     if (node.moduleId) return plannerGetModuleRates(node.moduleId);
-    return plannerGetRecipeRates(node.recipeId, node.recipeModifiers);
+    return plannerGetRecipeRates(node.recipeId, node.recipeModifiers, node);
 }
 
 /**
@@ -361,6 +385,7 @@ function _computeFlowsForPlanData(plan) {
         const parts = key.split('::'); // nodeId::item::dir
         const item = parts[1];
         const dir = parts[2];
+        if (plannerIsIdlePortalInput(parts[0], item, dir, flow, plan.data.nodes)) return;
         if (dir === 'out') outputSurplus[item] = (outputSurplus[item] || 0) + val;
         else inputShortage[item] = (inputShortage[item] || 0) + val;
     });
@@ -508,6 +533,15 @@ function _plannerResolveFlowsImpl(planData) {
     const flows = { nodePortsCache, portTheoretical, portRemaining, portConnections, edgeFlow };
     if (isMain) _plannerLastFlows = flows;
     return flows;
+}
+
+/**
+ * An unconnected portal input means the item is portaled in from elsewhere: it is not a shortage.
+ * Its demand stays in portRemaining so lightning/populate and drag-to-create can still size a supplier for it.
+ */
+function plannerIsIdlePortalInput(nodeId, item, dir, flows, nodes = plannerState.nodes) {
+    if (dir !== 'in' || nodes[nodeId]?.kind !== 'portal') return false;
+    return !((flows.portConnections[plannerPortKey(nodeId, item, 'in')] || []).length > 0);
 }
 
 function plannerGetAvailableRateAtPort(nodeId, item, dir) {
@@ -776,8 +810,11 @@ function autoGenerateAllUpstreamNodes(rootNodeId) {
     _plannerSelectedNodeIds.add(rootNodeId);
     allCreated.forEach(id => _plannerSelectedNodeIds.add(id));
 
+    // Each level is placed relative to its parent only, so deep chains collide with sibling subtrees.
+    // Render first so the real card heights exist in the DOM, then tidy the whole upstream tree.
     renderPlanner();
-    savePlannerState();
+    if (allCreated.length > 0) plannerAutoLayoutUpstream(rootNodeId); // renders + saves
+    else savePlannerState();
 }
 
 /** Select rootNodeId and all its upstream nodes (every ancestor along input edges), add them to the selection and redraw */
@@ -856,14 +893,22 @@ function _plannerBuildUpstreamTree(rootId, inAdj) {
     return children;
 }
 
+/** Card height plus the belt/heat/fert row that hangs below the card (absolutely positioned, may wrap) */
+function _plannerNodeLayoutHeight(nodeId) {
+    const el = document.getElementById('planner-node-' + nodeId);
+    if (!el) return 140;
+    const extra = el.querySelector('.planner-heatfert-row');
+    const extraHeight = extra && extra.offsetHeight > 0 ? extra.offsetHeight + 4 : 0; // 4 = its margin-top
+    return el.offsetHeight + extraHeight;
+}
+
 /**
  * Post-order: compute the vertical space (extent) each subtree needs.
  * Leaf: extent = its own card height.
  * Non-leaf: extent = sum of child extents + gaps, and at least its own card height
  */
 function _plannerComputeExtent(nodeId, children, extents) {
-    const el = document.getElementById('planner-node-' + nodeId);
-    const ownHeight = el ? el.offsetHeight : 140;
+    const ownHeight = _plannerNodeLayoutHeight(nodeId);
     const kids = children[nodeId] || [];
 
     if (kids.length === 0) {
@@ -915,9 +960,7 @@ function _plannerAssignTreeCoordinates(rootId, children, extents) {
 
         if (depth > 0) {
             const centerY = (childCenters[0] + childCenters[childCenters.length - 1]) / 2;
-            const el = document.getElementById('planner-node-' + nodeId);
-            const ownHeight = el ? el.offsetHeight : 140;
-            node.y = centerY - ownHeight / 2;
+            node.y = centerY - _plannerNodeLayoutHeight(nodeId) / 2;
         }
     }
 
@@ -1156,7 +1199,7 @@ function _findHighestCauldronCostOutputItem(nodeIds) {
     nodeIds.forEach(id => {
         const node = plannerState.nodes[id];
         if (!node) return;
-        const rates = plannerGetRecipeRates(node.recipeId, node.recipeModifiers);
+        const rates = plannerGetRecipeRates(node.recipeId, node.recipeModifiers, node);
         if (!rates) return;
         rates.outputsPerMachine.forEach(({ item }) => {
             const cost = DB.items[item]?.cauldronCost;

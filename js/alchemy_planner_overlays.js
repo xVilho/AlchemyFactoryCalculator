@@ -495,6 +495,41 @@ function openPlannerNodeModal(nodeId) {
     document.getElementById('planner-node-modal').style.display = 'flex';
 }
 
+/** Heating / fuel / fertilizer selects for one node (only the ones its machine uses); "Plan default" clears the override */
+function _buildPlannerNodeEnergySectionHtml(node) {
+    if (!node.recipeId) return '';
+    const raw = plannerGetRawRecipe(node.recipeId);
+    if (!raw) return '';
+    const heated = !!DB.machines[raw.machine]?.heatCost;
+    const nursery = (raw.nutrientCost || 0) > 0;
+    if (!heated && !nursery) return '';
+
+    const planEnergy = plannerEnergyOf(plannerState);
+    const own = node.energy || {};
+    const lists = plannerEnergyOptionLists();
+    const select = (field, label, list) => {
+        const planName = (list.find(([v]) => v === planEnergy[field]) || [planEnergy[field], planEnergy[field]])[1];
+        const opts = [`<option value="">${t('Plan default', 'ui')}: ${_plannerEscapeHtml(planName)}</option>`]
+            .concat(list.map(([v, l]) => `<option value="${_plannerEscapeHtml(v)}"${own[field] === v ? ' selected' : ''}>${_plannerEscapeHtml(l)}</option>`));
+        return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                <span style="width:80px; color:#aaa;">${t(label, 'ui')}</span>
+                <select style="flex:1;" data-energy-field="${field}" onchange="onPlannerNodeEnergyChange('${node.id}', '${field}', this.value)">${opts.join('')}</select>
+            </div>`;
+    };
+    let rows = '';
+    // The Steam Boiler always burns fuel, so it gets no heating-device choice
+    if (heated && raw.machine !== 'Steam Boiler') rows += select('heating', 'Heating', lists.heating);
+    if (heated) rows += select('fuel', 'Fuel', lists.fuel);
+    if (nursery) rows += select('fert', 'Fertilizer', lists.fert);
+    return `
+        <div class="planner-node-energy-section" style="margin-bottom:10px;">
+            <div style="font-size:0.78em; color:#888; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">
+                ${t('Energy (this node only)', 'ui')}
+            </div>
+            ${rows}
+        </div>`;
+}
+
 function renderPlannerNodeModalBody(nodeId) {
     const node = plannerState.nodes[nodeId];
     const body = document.getElementById('planner-node-modal-body');
@@ -549,6 +584,7 @@ function renderPlannerNodeModalBody(nodeId) {
 
     body.innerHTML = `        
         ${recipeSectionHtml}
+        ${_buildPlannerNodeEnergySectionHtml(node)}
         ${moduleSectionHtml}
         ${_buildPlannerNodeMismatchSectionHtml(node, flows)}
         <div style="height:1px; background:var(--border); margin:12px 0;"></div>
@@ -563,7 +599,7 @@ function renderPlannerNodeModalBody(nodeId) {
             <button class="split-btn" style="width:100%;" onclick="plannerAutoLayoutUpstream('${node.id}')">
                 ⇶ ${t('Auto-Layout Upstream', 'ui')}
             </button>
-            <button class="split-btn" style="width:100%;" onclick="autoGenerateAllUpstreamNodes('${node.id}')">
+            <button class="split-btn" style="width:100%;" onclick="autoGenerateAllUpstreamNodes('${node.id}'); closeModal('planner-node-modal')">
                 ⇇ ${t('Populate All Upstream', 'ui')}
             </button>
             <button class="split-btn" style="width:100%;" onclick="removeAllUpsteamNodes('${node.id}')">
@@ -1498,6 +1534,7 @@ function computePlannerSummaryStats(flows) {
         const parts = key.split('::'); // nodeId::item::dir
         const item = parts[1];
         const dir = parts[2];
+        if (plannerIsIdlePortalInput(parts[0], item, dir, flows)) return;
         if (dir === 'out') outputSurplus[item] = (outputSurplus[item] || 0) + val;
         else if (dir === 'in') inputShortage[item] = (inputShortage[item] || 0) + val;
     });
@@ -1763,6 +1800,54 @@ function _calculateNodeDemand(targetId) {
 
     vars.forEach(id => { nodes[id].machineCount = x[id]; });
     return { ok: true };
+}
+
+/**
+ * Size one node to its connections. Outputs connected: exactly what its consumers pull (the most demanding output wins).
+ * Only inputs connected: what its suppliers can deliver (the scarcest input wins). Returns the new count or null.
+ */
+function _plannerComputeBalancedCount(node, flows) {
+    const ports = flows.nodePortsCache[node.id];
+    const rates = plannerGetNodeRates(node);
+    if (!ports || !rates || rates.errorCode) return null;
+
+    const countsFor = (portList, perMachineList, dir) => {
+        const counts = [];
+        portList.forEach(port => {
+            const edgeIds = flows.portConnections[plannerPortKey(node.id, port.item, dir)] || [];
+            if (edgeIds.length === 0) return;
+            const perMachine = (perMachineList.find(p => p.item === port.item) || {}).rate || 0;
+            if (perMachine <= 0) return;
+            let target = 0;
+            edgeIds.forEach(eid => {
+                const edge = plannerState.edges[eid];
+                if (!edge) return;
+                const otherKey = dir === 'out'
+                    ? plannerPortKey(edge.toNode, port.item, 'in')
+                    : plannerPortKey(edge.fromNode, port.item, 'out');
+                target += (flows.edgeFlow[eid] || 0) + (flows.portRemaining[otherKey] || 0);
+            });
+            counts.push(target / perMachine);
+        });
+        return counts;
+    };
+
+    const outCounts = countsFor(ports.outputs, rates.outputsPerMachine, 'out');
+    if (outCounts.length) return Math.max(...outCounts);
+    const inCounts = countsFor(ports.inputs, rates.inputsPerMachine, 'in');
+    if (inCounts.length) return Math.min(...inCounts);
+    return null;
+}
+
+function plannerAutoBalanceNode(nodeId) {
+    const node = plannerState.nodes[nodeId];
+    if (!node) return;
+    const newCount = _plannerComputeBalancedCount(node, plannerResolveFlows());
+    if (newCount === null || Math.abs(newCount - node.machineCount) < 0.0001) return;
+    node.machineCount = Math.max(0, newCount);
+    recomputeAndRefreshPlanner();
+    savePlannerState();
+    flashPlannerElements(`[data-mc-for="${nodeId}"]`, 'mc-flash');
 }
 
 function plannerAutoBalanceUpstream(nodeId) {

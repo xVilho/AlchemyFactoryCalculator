@@ -96,6 +96,7 @@ let _plannerSelectedNodeIds = new Set();
 const PLANNER_ZOOM_MIN = 0.2;
 const PLANNER_ZOOM_MAX = 3;
 const PLANNER_GRID_STEPS = [40, 20, 10, 0];
+const PLANNER_GRID_MAJOR = 40; // Finer grids also show this coarser grid, which stays visible when zoomed out
 
 /** Per-plan viewport cache (in memory for this session only, not written to localStorage).
  *  key: planId -> { x, y, zoom }. Remembers where you left each plan when switching between plans. */
@@ -641,11 +642,19 @@ function updatePlannerGridBackground() {
         canvas.style.backgroundImage = 'radial-gradient(#2a2a2a 1px, transparent 1px)';
         canvas.style.backgroundSize = '24px 24px';
     } else {
-        const size = g * zoom;
-        canvas.style.backgroundImage =
-            'linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px), ' +
-            'linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px)';
-        canvas.style.backgroundSize = `${size}px ${size}px`;
+        // Lines fade out as they get dense on screen (fully gone below 4px apart, full strength from 12px).
+        // Finer grids also draw a 40px major grid that stays visible when the fine lines have faded.
+        const BASE_ALPHA = 0.07;
+        const fade = px => Math.max(0, Math.min(1, (px - 4) / 8));
+        const layer = (spacing, alpha) => {
+            const a = (alpha * fade(spacing * zoom)).toFixed(4);
+            return [`linear-gradient(to right, rgba(255,255,255,${a}) 1px, transparent 1px)`,
+                    `linear-gradient(to bottom, rgba(255,255,255,${a}) 1px, transparent 1px)`];
+        };
+        const layers = [{ spacing: g, images: layer(g, BASE_ALPHA) }];
+        if (g < PLANNER_GRID_MAJOR) layers.push({ spacing: PLANNER_GRID_MAJOR, images: layer(PLANNER_GRID_MAJOR, BASE_ALPHA) });
+        canvas.style.backgroundImage = layers.flatMap(l => l.images).join(', ');
+        canvas.style.backgroundSize = layers.flatMap(l => [`${l.spacing * zoom}px ${l.spacing * zoom}px`, `${l.spacing * zoom}px ${l.spacing * zoom}px`]).join(', ');
     }
     canvas.style.backgroundPosition = `${_plannerSettings.viewport.x}px ${_plannerSettings.viewport.y}px`;
 }
@@ -768,6 +777,34 @@ function syncPlannerEnergySelects() {
     const energy = plannerEnergyOf(plannerState);
     [['planner-heat-select', energy.heating], ['planner-fuel-select', energy.fuel], ['planner-fert-select', energy.fert]]
         .forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v) el.value = v; });
+}
+
+/** Option lists for energy selects: [value, label] pairs */
+function plannerEnergyOptionLists() {
+    const heating = Object.entries(DB.machines || {}).filter(([, m]) => m.isGenerator)
+        .sort(([a], [b]) => a.localeCompare(b)).map(([name]) => [name, t(name, 'machines')]);
+    const fuels = [], ferts = [];
+    Object.entries(DB.items || {}).forEach(([name, def]) => {
+        if (def.heat) fuels.push([name, def.heat]);
+        if (def.nutrientValue) ferts.push([name, def.nutrientValue]);
+    });
+    return {
+        heating,
+        fuel: fuels.sort((a, b) => b[1] - a[1]).map(([n, v]) => [n, `${n} (${v} P)`]),
+        fert: ferts.sort((a, b) => b[1] - a[1]).map(([n, v]) => [n, `${n} (${v} V)`])
+    };
+}
+
+/** Change one energy setting ('heating' | 'fuel' | 'fert') of a single node; '' goes back to the plan's setting */
+function onPlannerNodeEnergyChange(nodeId, field, value) {
+    const node = plannerState.nodes[nodeId];
+    if (!node) return;
+    node.energy = { ...(node.energy || {}) };
+    if (value) node.energy[field] = value; else delete node.energy[field];
+    if (!Object.keys(node.energy).length) delete node.energy;
+    renderPlanner();
+    savePlannerState();
+    if (typeof renderPlannerNodeModalBody === 'function') renderPlannerNodeModalBody(nodeId);
 }
 
 /** Change one energy setting ('heating' | 'fuel' | 'fert') of the active plan only */
@@ -977,6 +1014,7 @@ function createPlannerNodeEl(node, flows) {
                 ${machineIconHtml}
                 <span class="planner-node-title">${machineName}</span>            
                 <button class="planner-gear-btn ${node.isDone ? 'done-active' : ''}" title="${t('Toggle Done', 'ui')}" style="${node.isDone ? 'color:#4CAF50; font-weight:bold;' : ''}" onclick="event.stopPropagation(); togglePlannerNodeDone('${node.id}')">✔</button>
+                ${renderPlannerBalanceButtonsHtml(node.id)}
                 <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
                 <button class="planner-close-btn" title="${t('Remove Node', 'ui')}" onclick="removePlannerNode('${node.id}')">✕</button>
             </div>`;
@@ -996,6 +1034,7 @@ function createPlannerNodeEl(node, flows) {
             onmouseleave="hidePlannerRateTooltip()">
             <span class="planner-node-title">${titleName}</span>            
             <button class="planner-gear-btn ${node.isDone ? 'done-active' : ''}" title="${t('Toggle Done', 'ui')}" style="${node.isDone ? 'color:#4CAF50; font-weight:bold;' : ''}" onclick="event.stopPropagation(); togglePlannerNodeDone('${node.id}')">✔</button>
+            ${renderPlannerBalanceButtonsHtml(node.id)}
                 <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
             <button class="planner-close-btn" title="${t('Remove Node', 'ui')}" onclick="removePlannerNode('${node.id}')">✕</button>
         </div>`;
@@ -1044,7 +1083,7 @@ function createPlannerNodeEl(node, flows) {
 
 const PLANNER_NODE_MIN_W = 180, PLANNER_NODE_MAX_W = 600;
 
-/** Width handle on recipe/module nodes: drag to resize (stored as node.w), double-click to reset to the default width */
+/** Width handle on recipe/module/portal nodes: drag to resize (stored as node.w), double-click to reset to the default width */
 function attachPlannerNodeResize(wrap, node) {
     if (node.w) wrap.style.width = node.w + 'px';
     const handle = document.createElement('div');
@@ -1115,6 +1154,7 @@ function renderPlannerPortalNode(wrap, node, flows) {
                 <button class="planner-gear-btn" title="switch direction" onclick="event.stopPropagation(); plannerToggleNodeDirection('${node.id}')">
                 ⇄
             </button>
+            ${renderPlannerBalanceButtonsHtml(node.id)}
             <button class="planner-gear-btn" title="${t('Node Settings', 'ui')}" onclick="event.stopPropagation(); openPlannerNodeModal('${node.id}')">⚙</button>
             <button class="planner-close-btn" onclick="removePlannerNode('${node.id}')">
                 ✕
@@ -1137,8 +1177,24 @@ function renderPlannerPortalNode(wrap, node, flows) {
         </div>
     `;
 
-    attachPlannerNodeDrag(wrap, node); 
+    attachPlannerNodeDrag(wrap, node);
+    attachPlannerNodeResize(wrap, node);
     return wrap;
+}
+
+/** Header shortcuts: balance this node to its connections, and balance everything upstream of it */
+function renderPlannerBalanceButtonsHtml(nodeId) {
+    return `<button class="planner-gear-btn" title="${t('Auto-balance this node', 'ui')}" onclick="event.stopPropagation(); plannerAutoBalanceNode('${nodeId}')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="7" x2="20" y2="7"/>
+                <path d="M4 7l-3 7a3 3 0 0 0 6 0z"/><path d="M20 7l-3 7a3 3 0 0 0 6 0z"/><line x1="8" y1="21" x2="16" y2="21"/>
+            </svg>
+        </button>
+        <button class="planner-gear-btn" title="${t('Auto-balance all upstream', 'ui')}" onclick="event.stopPropagation(); plannerAutoBalanceUpstream('${nodeId}')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
+            </svg>
+        </button>`;
 }
 
 function plannerToggleNodeDirection(nodeId) {
@@ -1225,7 +1281,9 @@ function renderPlannerPortRow(nodeId, port, dir, flows) {
     const fertPart = dir === 'in' ? ((flows && flows.nodePortsCache[nodeId]?.fertByItem?.[port.item]) || 0) : 0;
     const isFertPort = fertPart > 0;
     const name = `<span class="planner-port-name">${port.item}</span>`;
-    const rate = `<span class="planner-port-rate">${formatVal(port.rate)}</span>`;
+    // Unconnected portal input: portaled in from elsewhere, so show no required amount
+    const idlePortalIn = flows && plannerIsIdlePortalInput(nodeId, port.item, dir, flows);
+    const rate = `<span class="planner-port-rate">${idlePortalIn ? '' : formatVal(port.rate)}</span>`;
     let title = port.item;
     if (isHeatPort) title = `${port.item}: heating${heatPart > 0 && heatPart < port.rate - 0.0001 ? ` (${formatVal(heatPart)}/m of it)` : ''}`;
     else if (isFertPort) title = `${port.item}: fertilizer${fertPart < port.rate - 0.0001 ? ` (${formatVal(fertPart)}/m of it)` : ''}`;
@@ -1260,7 +1318,7 @@ function renderPlannerHeatFertHtml(ports, node) {
  */
 function plannerGetNodeBeltInfo(node) {
     if (!node || (node.kind && node.kind !== 'recipe') || !node.recipeId) return null;
-    const rates = plannerGetRecipeRates(node.recipeId, node.recipeModifiers);
+    const rates = plannerGetRecipeRates(node.recipeId, node.recipeModifiers, node);
     if (!rates || rates.errorCode || !rates.recipe) return null;
     const beltSpeed = getBeltSpeed(DB.settings.lvlBelt || 0);
     const ports = [];
@@ -2082,7 +2140,7 @@ function tryCreatePlannerEdgeFromDots(sourceNodeId, item, sourceDir, targetDotEl
         const shortage = flows.portRemaining[sourceInKey] || 0;
         if (shortage > 0.001) {
             const targetNode = plannerState.nodes[targetNodeId];
-            const rates = targetNode ? plannerGetRecipeRates(targetNode.recipeId, targetNode.recipeModifiers) : null;
+            const rates = targetNode ? plannerGetRecipeRates(targetNode.recipeId, targetNode.recipeModifiers, targetNode) : null;
             const perMachineRate = rates
                 ? (rates.outputsPerMachine.find(p => p.item === item) || {}).rate || 0
                 : 0;

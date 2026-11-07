@@ -1834,9 +1834,40 @@ function _plannerComputeBalancedCount(node, flows) {
 
     const outCounts = countsFor(ports.outputs, rates.outputsPerMachine, 'out');
     if (outCounts.length) return Math.max(...outCounts);
-    const inCounts = countsFor(ports.inputs, rates.inputsPerMachine, 'in');
-    if (inCounts.length) return Math.min(...inCounts);
-    return null;
+
+    // Inputs: take what each supplier makes minus what its OTHER consumers need at their current counts.
+    // Ignores wiring order, so with siblings fixed (e.g. set to 1) this node soaks up exactly the leftover.
+    const inCounts = [];
+    ports.inputs.forEach(port => {
+        const edgeIds = flows.portConnections[plannerPortKey(node.id, port.item, 'in')] || [];
+        if (edgeIds.length === 0) return;
+        const perMachine = (rates.inputsPerMachine.find(p => p.item === port.item) || {}).rate || 0;
+        if (perMachine <= 0) return;
+        let available = 0;
+        edgeIds.forEach(eid => {
+            const edge = plannerState.edges[eid];
+            if (!edge) return;
+            const supplier = plannerState.nodes[edge.fromNode];
+            const outKey = plannerPortKey(edge.fromNode, port.item, 'out');
+            if (!supplier || supplier.kind === 'waypoint') { // Routed lines: fall back to the allocated flow
+                available += (flows.edgeFlow[eid] || 0) + (flows.portRemaining[outKey] || 0);
+                return;
+            }
+            let otherDemand = 0;
+            (flows.portConnections[outKey] || []).forEach(oid => {
+                const other = plannerState.edges[oid];
+                if (!other || other.toNode === node.id) return;
+                const otherInKey = plannerPortKey(other.toNode, port.item, 'in');
+                const otherSuppliers = (flows.portConnections[otherInKey] || []).length || 1;
+                otherDemand += (flows.portTheoretical[otherInKey] || 0) / otherSuppliers;
+            });
+            available += Math.max(0, (flows.portTheoretical[outKey] || 0) - otherDemand);
+        });
+        inCounts.push(available / perMachine);
+    });
+    if (!inCounts.length) return null;
+    const count = Math.min(...inCounts);
+    return count > 0.0001 ? count : null; // Nothing left for this node: leave it alone rather than zero it
 }
 
 function plannerAutoBalanceNode(nodeId) {

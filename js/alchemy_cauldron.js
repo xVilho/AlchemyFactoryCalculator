@@ -14,6 +14,9 @@ let cauldronState = {
     orderByEstCost: true,
     stepMode: 0,   // 0: single step, 1: multi-step
     intermediateLimit: 3,   // Max number of intermediate products in multi-step mode
+    useLimitsAsPool: false, // true: the ingredient pool is every item within the max points/coins limits (ticks ignored)
+    maxPoints: '',          // Max points / max coins limit fields, kept so the pool survives a reload
+    maxCoins: '',
     profiles: [
         { candidates: [] }, // Profile 1
         { candidates: [] }, // Profile 2
@@ -57,7 +60,11 @@ function initCauldron() {
     switchCauldronStepMode(cauldronState.stepMode, false);
     document.getElementById('cauldron-order-by-est-cost').checked = cauldronState.orderByEstCost;
     document.getElementById('cauldron-show-est-cost').checked = cauldronState.showEstCost;
-    document.getElementById('cauldron-intermediate-limit').value = cauldronState.intermediateLimit;    
+    document.getElementById('cauldron-intermediate-limit').value = cauldronState.intermediateLimit;
+    document.getElementById('cauldron-cand-max-points').value = cauldronState.maxPoints;
+    document.getElementById('cauldron-cand-max-coins').value = cauldronState.maxCoins;
+    document.getElementById('cauldron-use-limits-pool').checked = cauldronState.useLimitsAsPool;
+    renderCandidatePool();
     runCauldronSimulation();
 }
 
@@ -83,6 +90,9 @@ function loadCauldronSettings() {
     if (!(cauldronState.nutrPerCopper > 0)) cauldronState.nutrPerCopper = 12;
     if (cauldronState.stepMode === undefined) cauldronState.stepMode = 0;
     if (cauldronState.intermediateLimit === undefined) cauldronState.intermediateLimit = 3;
+    if (cauldronState.useLimitsAsPool === undefined) cauldronState.useLimitsAsPool = false;
+    if (cauldronState.maxPoints === undefined) cauldronState.maxPoints = '';
+    if (cauldronState.maxCoins === undefined) cauldronState.maxCoins = '';
 }
 
 function saveCauldronSettings() {
@@ -498,15 +508,46 @@ function candidateMatchesView(name) {
         if (!name.toLowerCase().includes(searchText) && !altName.toLowerCase().includes(searchText)) return false;
     }
 
+    return candidateWithinLimits(name);
+}
+
+/** Whether an item is within the max points / max coins limits (empty limit = no limit). */
+function candidateWithinLimits(name) {
+    const item = DB.items[name];
+    if (!item || !isVaildCandidate(name)) return false;
     const maxPoints = _readCandidateMax('cauldron-cand-max-points');
     if (maxPoints !== null && (item.cauldronCost || 0) > maxPoints) return false;
-
     const maxCoins = _readCandidateMax('cauldron-cand-max-coins');
     if (maxCoins !== null) {
         const coins = getItemBaseCost(name);
         if (coins === null || coins > maxCoins) return false;
     }
     return true;
+}
+
+/** Ingredient pool the simulations use: the ticked items, or with "use limits as pool" on, every item within the limits. */
+function getCauldronIngredientPool() {
+    if (cauldronState.useLimitsAsPool) return Object.keys(DB.items).filter(candidateWithinLimits);
+    return [...cauldronCandidates].filter(isVaildCandidate);
+}
+
+let _cauldronLimitTimer = null;
+/** Max points / max coins edited: refresh the list, remember the values, and rerun results when they drive the pool. */
+function onCauldronLimitChange() {
+    renderCandidatePool();
+    cauldronState.maxPoints = document.getElementById('cauldron-cand-max-points').value;
+    cauldronState.maxCoins = document.getElementById('cauldron-cand-max-coins').value;
+    saveCauldronSettings();
+    if (!cauldronState.useLimitsAsPool) return;
+    clearTimeout(_cauldronLimitTimer);
+    _cauldronLimitTimer = setTimeout(runCauldronSimulation, 300); // Typing "120" shouldn't run three simulations
+}
+
+function toggleCauldronLimitsAsPool(on) {
+    cauldronState.useLimitsAsPool = !!on;
+    renderCandidatePool();
+    saveCauldronSettings();
+    runCauldronSimulation();
 }
 
 function renderCandidatePool() {
@@ -530,8 +571,9 @@ function renderCandidatePool() {
         div.className = 'candidate-item';
         div.title = item.coins !== null ? `${t('Coin value')}: ≈${formatVal(item.coins)}` : '';
         const isChecked = cauldronCandidates.has(item.name) ? 'checked' : '';
+        const lockAttr = cauldronState.useLimitsAsPool ? 'disabled title="Pool is set by the max limits"' : '';
         div.innerHTML = `
-            <input type="checkbox" ${isChecked} onchange="toggleCandidate('${item.name}')">
+            <input type="checkbox" ${isChecked} ${lockAttr} onchange="toggleCandidate('${item.name}')">
             <img src="img/item${item.id ?? 0}.png" style="margin-left: 4px;" width="18" height="18" loading="lazy">
             <span class="cand-name" ${item.target > 0 ? 'style="color:#66ddff"' : ''}>${item.name}</span>
             <span class="cand-cost" title="${t('Cauldron Cost')}">${item.cost.toFixed(2)}</span>
@@ -691,7 +733,7 @@ function updateFilterUI() {
  */
 function shiftFilterItem(slotIdx, delta, event) {
     const useCandidatesOnly = !!(event && (event.ctrlKey || event.metaKey));
-    const baseList = useCandidatesOnly ? [...cauldronCandidates] : Object.keys(DB.items);
+    const baseList = useCandidatesOnly ? getCauldronIngredientPool() : Object.keys(DB.items);
     const list = baseList
         .filter(isVaildCandidate)
         .sort((a, b) => DB.items[a].cauldronCost - DB.items[b].cauldronCost);
@@ -892,7 +934,7 @@ async function runCauldronSimulationType0() {
 
     const validTargets = _getCauldronValidTargets();
 
-    const list = [...cauldronCandidates].filter(isVaildCandidate);
+    const list = getCauldronIngredientPool();
     list.sort((a, b) => (DB.items[b].cauldronCost - DB.items[a].cauldronCost)); // Largest first
 
     const progText = document.getElementById('cauldron-progress');
@@ -971,7 +1013,7 @@ async function runCauldronSimulationType1() {
     const maxTargetItem = validTargets.reduce((prev, current) => (prev.target > current.target) ? prev : current);
     const minTargetItem = validTargets.reduce((prev, current) => (prev.target < current.target) ? prev : current);
 
-    const list = [...cauldronCandidates].filter(isVaildCandidate);
+    const list = getCauldronIngredientPool();
     list.sort((a, b) => (DB.items[b].cauldronCost - DB.items[a].cauldronCost));
 
     const progText = document.getElementById('cauldron-progress');
@@ -1046,8 +1088,7 @@ async function runMultiStepCauldronSimulation() {
 
     // ---- Step 0: base costs from the candidate pool ----
     const step0 = new Map();
-    cauldronCandidates.forEach(item => {
-        if (!isVaildCandidate(item)) return;
+    getCauldronIngredientPool().forEach(item => {
         const cost = getItemBaseCost(item);
         if (cost === null) return;
         step0.set(item, { cost, cauldronCostSum: DB.items[item].cauldronCost, recipeInputs: null });

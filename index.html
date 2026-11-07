@@ -544,8 +544,12 @@
                         <select id="cauldron-cat-select" onchange="renderCandidatePool()"></select>
                     </div>
                     <div class="cauldron-cand-max-row">
-                        <input type="number" id="cauldron-cand-max-points" class="cauldron-cand-search" min="0" placeholder="Max points" title="Only show items with a cauldron point value at or below this" oninput="renderCandidatePool()">
-                        <input type="number" id="cauldron-cand-max-coins" class="cauldron-cand-search" min="0" placeholder="Max coins" title="Only show items with an estimated coin value at or below this (items with unknown value are hidden)" oninput="renderCandidatePool()">
+                        <input type="number" id="cauldron-cand-max-points" class="cauldron-cand-search" min="0" placeholder="Max points" title="Only show items with a cauldron point value at or below this" oninput="onCauldronLimitChange()">
+                        <input type="number" id="cauldron-cand-max-coins" class="cauldron-cand-search" min="0" placeholder="Max coins" title="Only show items with an estimated coin value at or below this (items with unknown value are hidden)" oninput="onCauldronLimitChange()">
+                    </div>
+                    <div class="checkbox-row" title="On: results use every item within the max points/coins limits, ignoring the checkboxes below">
+                        <input type="checkbox" id="cauldron-use-limits-pool" onchange="toggleCauldronLimitsAsPool(this.checked)">
+                        <label for="cauldron-use-limits-pool" style="display:inline; margin:0; cursor:pointer; font-size: 1.0em;">Use limits as ingredient pool</label>
                     </div>
                     <div class="split-btn-container">
                         <button class="split-btn" onclick="bulkToggleCandidates(true)" title="Check every item in the list below">Select All</button>
